@@ -3,5 +3,5 @@
 case ${reason} in
 TEST)   set | grep "^\(interface\|metric\|pid\|reason\|skip_hooks\)=" | sort
 	set | grep "^\(new_\|old_\)" | sort
-        ;;
+	;;
 esac

@@ -10,9 +10,16 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := common.c dhcp.c dhcpcd.c logger.c net.c \
 	signals.c configure.c client.c if-linux.c lpf.c
 LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
-LOCAL_CFLAGS := -DDISABLE_ARP
-LOCAL_SHARED_LIBRARIES := libc
+LOCAL_SHARED_LIBRARIES := libc libcutils
 LOCAL_MODULE = dhcpcd
+LOCAL_MODULE_TAGS := user development
+include $(BUILD_EXECUTABLE)
+
+include $(CLEAR_VARS)
+LOCAL_SRC_FILES := showlease.c
+LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
+LOCAL_SHARED_LIBRARIES := libc
+LOCAL_MODULE = showlease
 LOCAL_MODULE_TAGS := user development
 include $(BUILD_EXECUTABLE)
 

@@ -108,15 +108,13 @@ open_socket(struct interface *iface, int protocol)
 
 	/* Install the DHCP filter */
 	if (protocol == ETHERTYPE_ARP) {
-#ifdef ENABLE_ARP
 		pf.bf_insns = UNCONST(arp_bpf_filter);
 		pf.bf_len = arp_bpf_filter_len;
 		fdp = &iface->arp_fd;
-#endif
 	} else {
 		pf.bf_insns = UNCONST(dhcp_bpf_filter);
 		pf.bf_len = dhcp_bpf_filter_len;
-		fdp = &iface->fd;
+		fdp = &iface->raw_fd;
 	}
 	if (ioctl(fd, BIOCSETF, &pf) == -1)
 		goto eexit;
@@ -142,6 +140,7 @@ send_raw_packet(const struct interface *iface, int protocol,
 {
 	struct iovec iov[2];
 	struct ether_header hw;
+	int fd;
 
 	memset(&hw, 0, ETHER_HDR_LEN);
 	memset(&hw.ether_dhost, 0xff, ETHER_ADDR_LEN);
@@ -150,7 +149,11 @@ send_raw_packet(const struct interface *iface, int protocol,
 	iov[0].iov_len = ETHER_HDR_LEN;
 	iov[1].iov_base = UNCONST(data);
 	iov[1].iov_len = len;
-	return writev(iface->fd, iov, 2);
+	if (protocol == ETHERTYPE_ARP)
+		fd = iface->arp_fd;
+	else
+		fd = iface->raw_fd;
+	return writev(fd, iov, 2);
 }
 
 /* BPF requires that we read the entire buffer.
@@ -164,12 +167,10 @@ get_raw_packet(struct interface *iface, int protocol,
 	ssize_t bytes;
 	const unsigned char *payload;
 
-	if (protocol == ETHERTYPE_ARP) {
-#ifdef ENABLE_ARP
+	if (protocol == ETHERTYPE_ARP)
 		fd = iface->arp_fd;
-#endif
-	} else
-		fd = iface->fd;
+	else
+		fd = iface->raw_fd;
 
 	for (;;) {
 		if (iface->buffer_len == 0) {

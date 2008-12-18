@@ -28,13 +28,10 @@
 #ifndef SIGNAL_H
 #define SIGNAL_H
 
-#include <poll.h>
-
 int signal_init(void);
 int signal_setup(void);
 int signal_reset(void);
 int signal_fd(void);
-int signal_exists(int fd);
-int signal_read(int fd);
+int signal_read(void);
 
 #endif

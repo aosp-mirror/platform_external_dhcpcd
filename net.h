@@ -71,8 +71,8 @@
 #endif
 
 #define LINKLOCAL_ADDR	0xa9fe0000
-#define LINKLOCAL_MASK	0xffff0000
-#define LINKLOCAL_BRDC	0xa9feffff
+#define LINKLOCAL_MASK	IN_CLASSB_NET
+#define LINKLOCAL_BRDC	(LINKLOCAL_ADDR | ~LINKLOCAL_MASK)
 
 #ifndef IN_LINKLOCAL
 # define IN_LINKLOCAL(addr) ((addr & IN_CLASSB_NET) == LINKLOCAL_ADDR)
@@ -101,13 +101,12 @@ struct interface
 	size_t hwlen;
 	int arpable;
 
-	int fd;
+	int raw_fd;
 	int udp_fd;
+	int arp_fd;
+	int link_fd;
 	size_t buffer_size, buffer_len, buffer_pos;
 	unsigned char *buffer;
-#ifdef ENABLE_ARP
-	int arp_fd;
-#endif
 
 	struct in_addr addr;
 	struct in_addr net;
@@ -131,6 +130,7 @@ int do_mtu(const char *, short int);
 int inet_ntocidr(struct in_addr);
 int inet_cidrtoaddr(int, struct in_addr *);
 
+int up_interface(const char *);
 int do_interface(const char *, unsigned char *, size_t *,
 		 struct in_addr *, struct in_addr *, int);
 int if_address(const char *, const struct in_addr *, const struct in_addr *,
@@ -148,6 +148,8 @@ int if_route(const char *, const struct in_addr *, const struct in_addr *,
 	     const struct in_addr *, int, int);
 #define add_route(ifname, dest, mask, gate, metric) \
 	if_route(ifname, dest, mask, gate, metric, 1)
+#define change_route(ifname, dest, mask, gate, metric) \
+	if_route(ifname, dest, mask, gate, metric, 0)
 #define del_route(ifname, dest, mask, gate, metric) \
 	if_route(ifname, dest, mask, gate, metric, -1)
 void free_routes(struct rt *);
@@ -166,7 +168,9 @@ ssize_t send_raw_packet(const struct interface *, int,
 			const void *, ssize_t);
 ssize_t get_raw_packet(struct interface *, int, void *, ssize_t);
 
-#ifdef ENABLE_ARP
 int send_arp(const struct interface *, int, in_addr_t, in_addr_t);
-#endif
+
+int open_link_socket(struct interface *);
+int link_changed(struct interface *);
+int carrier_status(const char *);
 #endif

@@ -63,19 +63,20 @@ size_t strlcpy(char *, const char *, size_t);
 #endif
 
 #ifndef HAVE_CLOSEFROM
-#define HAVE_CLOSEFROM 1
+# if defined(__NetBSD__) || defined(__OpenBSD__)
+#  define HAVE_CLOSEFROM 1
+# endif
 #endif
-#if defined(__linux__) || defined(__FreeBSD__)
-#  undef HAVE_CLOSEFROM
+#ifndef HAVE_CLOSEFROM
 int closefrom(int);
 #endif
 
 int close_fds(void);
 int set_cloexec(int);
 int set_nonblock(int);
-int fd_hasdata(int);
 ssize_t get_line(char **, size_t *, FILE *);
-int get_time(struct timeval *);
+extern int clock_monotonic;
+int get_monotonic(struct timeval *);
 time_t uptime(void);
 int writepid(int, pid_t);
 void *xrealloc(void *, size_t);

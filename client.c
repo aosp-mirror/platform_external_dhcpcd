@@ -53,12 +53,7 @@
 #include "logger.h"
 #include "signals.h"
 
-#ifdef ENABLE_IPV4LL
-# ifndef ENABLE_ARP
- # error "IPv4LL requires ENABLE_ARP to work"
-# endif
-# define IPV4LL_LEASETIME 	2
-#endif
+#define IPV4LL_LEASETIME 	2
 
 /* Some platforms don't define INFTIM */
 #ifndef INFTIM
@@ -73,17 +68,18 @@
 #define STATE_REBINDING         5
 #define STATE_REBOOT            6
 #define STATE_RENEW_REQUESTED   7
-#define STATE_PROBING		8
-#define STATE_ANNOUNCING	9
+#define STATE_INIT_IPV4LL	8
+#define STATE_PROBING		9
+#define STATE_ANNOUNCING	10
 
-/* Constants taken from RFC 2131. 
- * We multiply some numbers by 1000 so they are suitable for use in poll(). */
+/* Constants taken from RFC 2131. */
 #define T1			0.5
 #define T2			0.875
-#define DHCP_BASE		4 * 1000
-#define DHCP_RAND_MIN		-1 * 1000
-#define DHCP_RAND_MAX		1 * 1000
-#define DHCP_MAX		64 * 1000
+#define DHCP_BASE		4
+#define DHCP_MAX		64
+#define DHCP_RAND_MIN		-1
+#define DHCP_RAND_MAX		1
+#define DHCP_ARP_FAIL		10
 
 /* We should define a maximum for the NAK exponential backoff */ 
 #define NAKOFF_MAX              60
@@ -91,23 +87,43 @@
 #define SOCKET_CLOSED           0
 #define SOCKET_OPEN             1
 
-/* Indexes for pollfds */
-#define POLLFD_SIGNAL           0
-#define POLLFD_IFACE            1 
-#define POLLFD_ARP		2
-
-/* These are really for IPV4LL, RFC 3927.
- * We multiply some numbers by 1000 so they are suitable for use in poll(). */
-#define PROBE_WAIT		 1 * 1000
+/* These are for IPV4LL, RFC 3927. */
+#define PROBE_WAIT		 1
 #define PROBE_NUM		 3
-#define PROBE_MIN		 1 * 1000
-#define PROBE_MAX		 2 * 1000
-#define ANNOUNCE_WAIT		 2 * 1000
-#define ANNOUNCE_NUM		 2
-#define ANNOUNCE_INTERVAL	 2 * 1000
+#define PROBE_MIN		 1
+#define PROBE_MAX		 2
+#define ANNOUNCE_WAIT		 2
+/* BSD systems always do a grauitous ARP when assigning an address,
+ * so we can do one less announce. */
+#ifdef BSD
+# define ANNOUNCE_NUM		 1
+#else
+# define ANNOUNCE_NUM		 2
+#endif
+#define ANNOUNCE_INTERVAL	 2
 #define MAX_CONFLICTS		10
 #define RATE_LIMIT_INTERVAL	60
 #define DEFEND_INTERVAL		10
+
+
+/* number of usecs in a second. */
+#define USECS_SECOND		1000000
+/* As we use timevals, we should use the usec part for
+ * greater randomisation. */
+#define DHCP_RAND_MIN_U		DHCP_RAND_MIN * USECS_SECOND
+#define DHCP_RAND_MAX_U		DHCP_RAND_MAX * USECS_SECOND
+#define PROBE_MIN_U		PROBE_MIN * USECS_SECOND
+#define PROBE_MAX_U		PROBE_MAX * USECS_SECOND
+
+#define timernorm(tvp)						\
+	do {							\
+		while ((tvp)->tv_usec >= 1000000) {		\
+			(tvp)->tv_sec++;			\
+			(tvp)->tv_usec -= 1000000;		\
+		}						\
+	} while (0 /* CONSTCOND */);
+
+#define timerneg(tvp)	((tvp)->tv_sec < 0 || (tvp)->tv_usec < 0)
 
 struct if_state {
 	int options;
@@ -116,24 +132,27 @@ struct if_state {
 	struct dhcp_message *new;
 	struct dhcp_message *old;
 	struct dhcp_lease lease;
-	struct timeval start;
+	struct timeval timeout;
 	struct timeval stop;
+	struct timeval exit;
 	int state;
 	int messages;
-	long timeout;
 	time_t nakoff;
 	uint32_t xid;
 	int socket;
 	int *pid_fd;
 	int signal_fd;
-#ifdef ENABLE_ARP
+	int carrier;
 	int probes;
 	int claims;
 	int conflicts;
 	time_t defend;
 	struct in_addr fail;
-#endif
 };
+
+#define LINK_UP 	1
+#define LINK_UNKNOWN	0
+#define LINK_DOWN 	-1
 
 struct dhcp_op {
         uint8_t value;
@@ -163,19 +182,17 @@ get_dhcp_op(uint8_t type)
 	return NULL;
 }
 
+#ifdef THERE_IS_NO_FORK
+#define daemonise(a,b) 0
+#else
 static int
 daemonise(struct if_state *state, const struct options *options)
 {
 	pid_t pid;
 	sigset_t full;
 	sigset_t old;
-#ifdef THERE_IS_NO_FORK
-	char **argv;
-	int i;
-#else
 	char buf = '\0';
 	int sidpipe[2];
-#endif
 
 	if (state->options & DHCPCD_DAEMONISED ||
 	    !(options->options & DHCPCD_DAEMONISE))
@@ -184,7 +201,6 @@ daemonise(struct if_state *state, const struct options *options)
 	sigfillset(&full);
 	sigprocmask(SIG_SETMASK, &full, &old);
 
-#ifndef THERE_IS_NO_FORK
 	/* Setup a signal pipe so parent knows when to exit. */
 	if (pipe(sidpipe) == -1) {
 		logger(LOG_ERR,"pipe: %s", strerror(errno));
@@ -214,36 +230,6 @@ daemonise(struct if_state *state, const struct options *options)
 			close(sidpipe[0]);
 			break;
 	}
-#else
-	logger(LOG_INFO, "forking to background");
-
-	/* We need to add --daemonise to our options */
-	argv = xmalloc(sizeof(char *) * (dhcpcd_argc + 4));
-	argv[0] = dhcpcd;
-	for (i = 1; i < dhcpcd_argc; i++)
-		argv[i] = dhcpcd_argv[i];
-	argv[i] = (char *)"--daemonised";
-	if (dhcpcd_skiproutes) {
-		argv[++i] = (char *)"--skiproutes";
-		argv[++i] = dhcpcd_skiproutes;
-	}
-	argv[i + 1] = NULL;
-
-	switch (pid = vfork()) {
-		case -1:
-			logger(LOG_ERR, "vfork: %s", strerror(errno));
-			_exit(EXIT_FAILURE);
-		case 0:
-			signal_reset();
-			sigprocmask(SIG_SETMASK, &old, NULL);
-			execvp(dhcpcd, argv);
-			/* Must not use stdio here. */
-			write(STDERR_FILENO, "exec failed\n", 12);
-			_exit(EXIT_FAILURE);
-	}
-
-	free(argv);
-#endif
 
 	/* Done with the fd now */
 	if (pid != 0) {
@@ -253,18 +239,16 @@ daemonise(struct if_state *state, const struct options *options)
 	}
 
 	sigprocmask(SIG_SETMASK, &old, NULL);
-
-	state->state = STATE_BOUND;
 	if (pid == 0) {
 		state->options |= DHCPCD_DAEMONISED;
+		timerclear(&state->exit);
 		return 0;
 	}
-
 	state->options |= DHCPCD_PERSISTENT | DHCPCD_FORKED;
 	return -1;
 }
+#endif
 
-#ifndef MINIMAL
 #define THIRTY_YEARS_IN_SECONDS    946707779
 static size_t
 get_duid(unsigned char *duid, const struct interface *iface)
@@ -333,9 +317,7 @@ get_duid(unsigned char *duid, const struct interface *iface)
 	}
 	return len;
 }
-#endif
 
-#ifdef ENABLE_IPV4LL
 static struct dhcp_message*
 ipv4ll_get_dhcp(uint32_t old_addr)
 {
@@ -346,42 +328,58 @@ ipv4ll_get_dhcp(uint32_t old_addr)
 	dhcp = xzalloc(sizeof(*dhcp));
 	/* Put some LL options in */
 	p = dhcp->options;
-	*p++ = DHCP_SUBNETMASK;
-	*p += sizeof(u32);
-	u32 = LINKLOCAL_MASK;
+	*p++ = DHO_SUBNETMASK;
+	*p++ = sizeof(u32);
+	u32 = htonl(LINKLOCAL_MASK);
 	memcpy(p, &u32, sizeof(u32));
 	p += sizeof(u32);
-	*p++ = DHCP_BROADCAST;
-	*p += sizeof(u32);
-	u32 = LINKLOCAL_BRDC;
+	*p++ = DHO_BROADCAST;
+	*p++ = sizeof(u32);
+	u32 = htonl(LINKLOCAL_BRDC);
 	memcpy(p, &u32, sizeof(u32));
 	p += sizeof(u32);
-	*p++ = DHCP_END;
+	*p++ = DHO_END;
 
 	for (;;) {
 		dhcp->yiaddr = htonl(LINKLOCAL_ADDR |
 				     (((uint32_t)abs((int)arc4random())
 				       % 0xFD00) + 0x0100));
-		if (dhcp->yiaddr != old_addr)
+		if (dhcp->yiaddr != old_addr &&
+		    IN_LINKLOCAL(ntohl(dhcp->yiaddr)))
 			break;
 	}
 	return dhcp;
 }
-#endif
+
+static double
+timeval_to_double(struct timeval *tv)
+{
+	return tv->tv_sec * 1.0 + tv->tv_usec * 1.0e-6;
+}
 
 static void
 get_lease(struct dhcp_lease *lease, const struct dhcp_message *dhcp)
 {
+	time_t t;
+
 	lease->frominfo = 0;
 	lease->addr.s_addr = dhcp->yiaddr;
 
-	if (get_option_addr(&lease->net.s_addr, dhcp, DHCP_SUBNETMASK) == -1)
+	if (get_option_addr(&lease->net.s_addr, dhcp, DHO_SUBNETMASK) == -1)
 		lease->net.s_addr = get_netmask(dhcp->yiaddr);
-	if (get_option_uint32(&lease->leasetime, dhcp, DHCP_LEASETIME) != 0)
+	if (get_option_uint32(&lease->leasetime, dhcp, DHO_LEASETIME) == 0) {
+		/* Ensure that we can use the lease */
+		t = 0;
+		if (t + (time_t)lease->leasetime < t) {
+			logger(LOG_WARNING, "lease of %u would overflow, "
+			       "treating as infinite", lease->leasetime);
+			lease->leasetime = ~0U; /* Infinite lease */
+		}
+	} else
 		lease->leasetime = DEFAULT_LEASETIME;
-	if (get_option_uint32(&lease->renewaltime, dhcp, DHCP_RENEWALTIME) != 0)
+	if (get_option_uint32(&lease->renewaltime, dhcp, DHO_RENEWALTIME) != 0)
 		lease->renewaltime = 0;
-	if (get_option_uint32(&lease->rebindtime, dhcp, DHCP_REBINDTIME) != 0)
+	if (get_option_uint32(&lease->rebindtime, dhcp, DHO_REBINDTIME) != 0)
 		lease->rebindtime = 0;
 }
 
@@ -390,21 +388,21 @@ get_old_lease(struct if_state *state)
 {
 	struct interface *iface = state->interface;
 	struct dhcp_lease *lease = &state->lease;
-	struct dhcp_message *dhcp;
+	struct dhcp_message *dhcp = NULL;
 	struct timeval tv;
 	unsigned int offset = 0;
 	struct stat sb;
 
+	if (stat(iface->leasefile, &sb) == -1) {
+		if (errno != ENOENT)
+			logger(LOG_ERR, "stat: %s", strerror(errno));
+		goto eexit;
+	}
 	if (!IN_LINKLOCAL(ntohl(iface->addr.s_addr)))
 		logger(LOG_INFO, "trying to use old lease in `%s'",
 		       iface->leasefile);
 	if ((dhcp = read_lease(iface)) == NULL) {
-		if (errno != ENOENT)
-			logger(LOG_INFO, "read_lease: %s", strerror(errno));
-		goto eexit;
-	}
-	if (stat(iface->leasefile, &sb) == -1) {
-		logger(LOG_ERR, "stat: %s", strerror(errno));
+		logger(LOG_INFO, "read_lease: %s", strerror(errno));
 		goto eexit;
 	}
 	get_lease(&state->lease, dhcp);
@@ -416,10 +414,8 @@ get_old_lease(struct if_state *state)
 	dhcp->servername[0] = '\0';
 
 	if (!IN_LINKLOCAL(ntohl(dhcp->yiaddr))) {
-#ifndef THERE_IS_NO_FORK
 		if (!(state->options & DHCPCD_LASTLEASE))
 			goto eexit;
-#endif
 
 		/* Ensure that we can still use the lease */
 		if (gettimeofday(&tv, NULL) == -1) {
@@ -429,7 +425,7 @@ get_old_lease(struct if_state *state)
 
 		offset = tv.tv_sec - lease->leasedfrom;
 		if (lease->leasedfrom &&
-		    tv.tv_sec - lease->leasedfrom > lease->leasetime)
+		    tv.tv_sec - lease->leasedfrom > (time_t)lease->leasetime)
 		{
 			logger(LOG_ERR, "lease expired %u seconds ago",
 			       offset + lease->leasetime);
@@ -445,8 +441,8 @@ get_old_lease(struct if_state *state)
 
 	if (lease->leasedfrom == 0)
 		offset = 0;
-	state->timeout = lease->renewaltime - offset;
 	iface->start_uptime = uptime();
+	state->timeout.tv_sec = lease->renewaltime - offset;
 	free(state->old);
 	state->old = state->new;
 	state->new = NULL;
@@ -465,24 +461,25 @@ client_setup(struct if_state *state, const struct options *options)
 	struct interface *iface = state->interface;
 	struct dhcp_lease *lease = &state->lease;
 	struct in_addr addr;
-#ifndef MINIMAL
+	struct timeval tv;
 	size_t len = 0;
 	unsigned char *duid = NULL;
 	uint32_t ul;
-#endif
 
 	state->state = STATE_INIT;
 	state->nakoff = 1;
 	state->options = options->options;
+	timerclear(&tv);
 
 	if (options->request_address.s_addr == 0 &&
 	    (options->options & DHCPCD_INFORM ||
 	     options->options & DHCPCD_REQUEST ||
-	     options->options & DHCPCD_DAEMONISED))
+	     (options->options & DHCPCD_DAEMONISED &&
+	      !(options->options & DHCPCD_BACKGROUND))))
 	{
 		if (get_old_lease(state) != 0)
 			return -1;
-		state->timeout = 0;
+		timerclear(&state->timeout);
 
 		if (!(options->options & DHCPCD_DAEMONISED) &&
 		    IN_LINKLOCAL(ntohl(lease->addr.s_addr)))
@@ -490,19 +487,19 @@ client_setup(struct if_state *state, const struct options *options)
 			logger(LOG_ERR, "cannot request a link local address");
 			return -1;
 		}
-#ifdef THERE_IS_NO_FORK
-		if (options->options & DHCPCD_DAEMONISED) {
-			state->state = STATE_BOUND;
-			state->timeout = state->lease.renewaltime;
-			iface->addr.s_addr = lease->addr.s_addr;
-			iface->net.s_addr = lease->net.s_addr;
-			get_option_addr(&lease->server.s_addr,
-					state->offer, DHCP_SERVERID);
-		}
-#endif
 	} else {
 		lease->addr.s_addr = options->request_address.s_addr;
 		lease->net.s_addr = options->request_netmask.s_addr;
+	}
+
+	if (options->options & DHCPCD_REQUEST &&
+	    state->options & DHCPCD_ARP &&
+	    !state->offer)
+	{
+		state->offer = xzalloc(sizeof(*state->offer));
+		state->offer->yiaddr = options->request_address.s_addr;
+		state->state = STATE_PROBING;
+		state->xid = arc4random();
 	}
 
 	/* If INFORMing, ensure the interface has the address */
@@ -522,7 +519,6 @@ client_setup(struct if_state *state, const struct options *options)
 		iface->net.s_addr = lease->net.s_addr;
 	}
 
-#ifndef MINIMAL
 	if (*options->clientid) {
 		iface->clientid = xmalloc(options->clientid[0] + 1);
 		memcpy(iface->clientid,
@@ -536,7 +532,7 @@ client_setup(struct if_state *state, const struct options *options)
 		}
 
 		if (len > 0) {
-			logger(LOG_INFO, "DUID = %s",
+			logger(LOG_DEBUG, "DUID = %s",
 			       hwaddr_ntoa(duid, len));
 
 			iface->clientid = xmalloc(len + 6);
@@ -568,34 +564,64 @@ client_setup(struct if_state *state, const struct options *options)
 			memcpy(iface->clientid + 2, iface->hwaddr, iface->hwlen);
 		}
 	}
-#endif
 
+	if (state->options & DHCPCD_LINK) {
+		open_link_socket(iface);
+		switch (carrier_status(iface->name)) {
+		case 0:
+			state->carrier = LINK_DOWN;
+			break;
+		case 1:
+			state->carrier = LINK_UP;
+			break;
+		default:
+			state->carrier = LINK_UNKNOWN;
+		}
+	}
+
+	if (options->timeout > 0 &&
+	    !(state->options & DHCPCD_DAEMONISED))
+	{
+		if (state->options & DHCPCD_IPV4LL) {
+			state->stop.tv_sec = options->timeout;
+			if (!(state->options & DHCPCD_BACKGROUND))
+				state->exit.tv_sec = state->stop.tv_sec + 10;
+		} else if (!(state->options & DHCPCD_BACKGROUND))
+			state->exit.tv_sec = options->timeout;
+	}
 	return 0;
 }
 
 static int 
 do_socket(struct if_state *state, int mode)
 {
-	if (state->interface->fd >= 0) {
-		close(state->interface->fd);
-		state->interface->fd = -1;
+	if (state->interface->raw_fd != -1) {
+		close(state->interface->raw_fd);
+		state->interface->raw_fd = -1;
 	}
-	if (mode == SOCKET_CLOSED && state->interface->udp_fd >= 0) {
-		close(state->interface->udp_fd);
-		state->interface->udp_fd = -1;
+	if (mode == SOCKET_CLOSED) {
+		if (state->interface->udp_fd != -1) {
+			close(state->interface->udp_fd);
+			state->interface->udp_fd = -1;
+		}
+		if (state->interface->arp_fd != -1) {
+			close(state->interface->arp_fd);
+			state->interface->arp_fd = -1;
+		}
 	}
 
-	/* We need to bind to a port, otherwise we generate ICMP messages
-	 * that cannot connect the port when we have an address.
-	 * We don't actually use this fd at all, instead using our packet
-	 * filter socket. */
+	/* Always have the UDP socket open to avoid the kernel sending
+	 * ICMP unreachable messages. */
+	/* For systems without SO_BINDTODEVICE, (ie BSD ones) we may get an
+	 * error or EADDRINUSE when binding to INADDR_ANY as another dhcpcd
+	 * instance could be running.
+	 * Oddly enough, we don't care about this as the socket is there
+	 * just to please the kernel - we don't care for reading from it. */
 	if (mode == SOCKET_OPEN &&
 	    state->interface->udp_fd == -1 &&
-	    state->lease.addr.s_addr != 0)
-		if (open_udp_socket(state->interface) == -1) {
-			logger(LOG_ERR, "open_udp_socket: %s", strerror(errno));
-			return -1;
-		}
+	    open_udp_socket(state->interface) == -1 &&
+	    (errno != EADDRINUSE || state->interface->addr.s_addr != 0))
+		logger(LOG_ERR, "open_udp_socket: %s", strerror(errno));
 
 	if (mode == SOCKET_OPEN) 
 		if (open_socket(state->interface, ETHERTYPE_IP) == -1) {
@@ -611,107 +637,211 @@ send_message(struct if_state *state, int type, const struct options *options)
 {
 	struct dhcp_message *dhcp;
 	uint8_t *udp;
-	ssize_t len;
-	ssize_t r;
-	struct in_addr from;
-	struct in_addr to;
+	ssize_t len, r;
+	struct in_addr from, to;
+	in_addr_t a = 0;
 
-	logger(LOG_DEBUG, "sending %s with xid 0x%x",
-	       get_dhcp_op(type), state->xid);
+	if (state->carrier == LINK_DOWN)
+		return 0;
+	if (type == DHCP_RELEASE)
+		logger(LOG_DEBUG, "sending %s with xid 0x%x",
+		       get_dhcp_op(type), state->xid);
+	else
+		logger(LOG_DEBUG,
+		       "sending %s with xid 0x%x, next in %0.2f seconds",
+		       get_dhcp_op(type), state->xid,
+		       timeval_to_double(&state->timeout));
 	state->messages++;
+	if (state->messages < 0)
+		state->messages = INT_MAX;
+	/* If we couldn't open a UDP port for our IP address
+	 * then we cannot renew.
+	 * This could happen if our IP was pulled out from underneath us. */
+	if (state->interface->udp_fd == -1) {
+		a = state->interface->addr.s_addr;
+		state->interface->addr.s_addr = 0;
+	}
 	len = make_message(&dhcp, state->interface, &state->lease, state->xid,
 			   type, options);
+	if (state->interface->udp_fd == -1)
+		state->interface->addr.s_addr = a;
 	from.s_addr = dhcp->ciaddr;
 	if (from.s_addr)
 		to.s_addr = state->lease.server.s_addr;
 	else
 		to.s_addr = 0;
-	if (to.s_addr) {
+	if (to.s_addr && to.s_addr != INADDR_BROADCAST) {
 		r = send_packet(state->interface, to, (uint8_t *)dhcp, len);
 		if (r == -1)
 			logger(LOG_ERR, "send_packet: %s", strerror(errno));
 	} else {
 		len = make_udp_packet(&udp, (uint8_t *)dhcp, len, from, to);
-		free(dhcp);
 		r = send_raw_packet(state->interface, ETHERTYPE_IP, udp, len);
+		free(udp);
 		if (r == -1)
 			logger(LOG_ERR, "send_raw_packet: %s", strerror(errno));
-		free(udp);
+	}
+	free(dhcp);
+	/* Failed to send the packet? Return to the init state */
+	if (r == -1) {
+		state->state = STATE_INIT;
+		timerclear(&state->timeout);
+		timerclear(&state->stop);
+		do_socket(state, SOCKET_CLOSED);
 	}
 	return r;
 }
 
 static void
-drop_config(struct if_state *state, const char *reason, const struct options *options)
+drop_config(struct if_state *state, const char *reason,
+	    const struct options *options)
 {
-	configure(state->interface, reason, NULL, state->new,
-		  &state->lease, options, 0);
-	free(state->old);
-	state->old = NULL;
-	free(state->new);
-	state->new = NULL;
-
+	if (state->new || strcmp(reason, "FAIL") == 0) {
+		configure(state->interface, reason, NULL, state->new,
+			  &state->lease, options, 0);
+		free(state->old);
+		state->old = NULL;
+		free(state->new);
+		state->new = NULL;
+	}
 	state->lease.addr.s_addr = 0;
 }
 
-static int
-wait_for_packet(struct if_state *state)
+static void
+reduce_timers(struct if_state *state, const struct timeval *tv)
 {
-	struct pollfd fds[3]; /* iface, arp, signal */
-	int retval, timeout, nfds = 0;
-	time_t start;
-	struct timeval now, d;
+	if (timerisset(&state->exit)) {
+		timersub(&state->exit, tv, &state->exit);
+		if (!timerisset(&state->exit))
+			state->exit.tv_sec = -1;
+	}
+	if (timerisset(&state->stop)) {
+		timersub(&state->stop, tv, &state->stop);
+		if (!timerisset(&state->stop))
+			state->stop.tv_sec = -1;
+	}
+	if (timerisset(&state->timeout)) {
+		timersub(&state->timeout, tv, &state->timeout);
+		if (!timerisset(&state->timeout))
+			state->timeout.tv_sec = -1;
+	}
+}
+
+static struct timeval *
+get_lowest_timer(struct if_state *state)
+{
+	struct timeval *ref = NULL;
+	
+	if (timerisset(&state->exit))
+		ref = &state->exit;
+	if (timerisset(&state->stop)) {
+		if (!ref || timercmp(&state->stop, ref, <))
+			ref = &state->stop;
+	}
+	if (timerisset(&state->timeout)) {
+		if (!ref || timercmp(&state->timeout, ref, <))
+			ref = &state->timeout;
+	}
+	return ref;
+}
+
+static int
+wait_for_fd(struct if_state *state, int *fd)
+{
+	struct pollfd fds[4]; /* signal, link, raw, arp */
+	struct interface *iface = state->interface;
+	int i, r, nfds = 0, msecs = -1;
+	struct timeval start, stop, diff, *ref;
+	static int lastinf = 0;
+
+	/* Ensure that we haven't already timed out */
+	ref = get_lowest_timer(state);
+	if (ref && timerneg(ref))
+		return 0;
 
 	/* We always listen to signals */
 	fds[nfds].fd = state->signal_fd;
 	fds[nfds].events = POLLIN;
 	nfds++;
+	/* And links */
+	if (iface->link_fd != -1) {
+		fds[nfds].fd = iface->link_fd;
+		fds[nfds].events = POLLIN;
+		nfds++;
+	}
 
-	if (state->lease.leasetime == ~0U && state->state == STATE_BOUND) {
-		logger(LOG_DEBUG, "waiting for infinity");
-		timeout = INFTIM;
+	if (state->lease.leasetime == ~0U &&
+	    state->state == STATE_BOUND)
+	{
+		if (!lastinf) {
+			logger(LOG_DEBUG, "waiting for infinity");
+			lastinf = 1;
+		}
+		ref = NULL;
+	} else if (state->carrier == LINK_DOWN && !ref) {
+		if (!lastinf) {
+			logger(LOG_DEBUG, "waiting for carrier");
+			lastinf = 1;
+		}
+		if (timerisset(&state->exit))
+			ref = &state->exit;
+		else
+			ref = NULL;
 	} else {
-		timeout = state->timeout;
-		if (timerisset(&state->stop)) {
-			get_time(&now);
-			if (timercmp(&state->stop, &now, >)) {
-				timersub(&state->stop, &now, &d);
-				retval = d.tv_sec * 1000 + (d.tv_usec + 999) / 1000;
-				if (retval < timeout)
-					timeout = retval;
-			}
-		}
-		if (timeout <= 0)
-			return 0;
-		if (state->interface->fd != -1) {
-			fds[nfds].fd = state->interface->fd;
+		if (iface->raw_fd != -1) {
+			fds[nfds].fd = iface->raw_fd;
 			fds[nfds].events = POLLIN;
 			nfds++;
 		}
-#ifdef ENABLE_ARP
-		if (state->interface->arp_fd != -1) {
-			fds[nfds].fd = state->interface->arp_fd;
+		if (iface->arp_fd != -1) {
+			fds[nfds].fd = iface->arp_fd;
 			fds[nfds].events = POLLIN;
 			nfds++;
 		}
-#endif
-		logger(LOG_DEBUG, "waiting for %0.3f seconds",
-		       (float)timeout / 1000);
 	}
 
-	start = uptime();
-	retval = poll(fds, nfds, timeout);
-	if (timeout != INFTIM) {
-		state->timeout -= uptime() - start;
-		if (state->timeout < 0)
-			state->timeout = 0;
-	}
-	if (retval == -1) {
-		if (errno == EINTR)
+	/* Wait and then reduce the timers.
+	 * If we reduce a timer to zero, set it negative to indicate timeout.
+	 * We cannot reliably use select as there is no guarantee we will
+	 * actually wait the whole time if greater than 31 days according
+	 * to POSIX. So we loop on poll if needed as it's limitation of
+	 * INT_MAX milliseconds is known. */
+	for (;;) {
+		get_monotonic(&start);
+		if (ref) {
+			lastinf = 0;
+			if (ref->tv_sec > INT_MAX / 1000 ||
+			    (ref->tv_sec == INT_MAX / 1000 &&
+			     (ref->tv_usec + 999) / 1000 > INT_MAX % 1000))
+				msecs = INT_MAX;
+			else
+				msecs = ref->tv_sec * 1000 +
+					(ref->tv_usec + 999) / 1000;
+		} else
+			msecs = -1;
+		r = poll(fds, nfds, msecs);
+		get_monotonic(&stop);
+		timersub(&stop, &start, &diff);
+		reduce_timers(state, &diff);
+		if (r == -1) {
+			if (errno != EINTR)
+				logger(LOG_ERR, "poll: %s", strerror(errno));
+			return -1;
+		}
+		if (r)
+			break;
+		/* We should not have an infinite timeout if we get here */
+		if (timerneg(ref))
 			return 0;
-		logger(LOG_ERR, "poll: %s", strerror(errno));
 	}
-	return retval;
+
+	/* We configured our array in the order we should deal with them */
+	for (i = 0; i < nfds; i++)
+		if (fds[i].revents & POLLIN) {
+			*fd = fds[i].fd;
+			return r;
+		}
+	return r;
 }
 
 static int
@@ -730,37 +860,18 @@ handle_signal(int sig, struct if_state *state,  const struct options *options)
 		if (!(state->options & DHCPCD_PERSISTENT))
 			drop_config(state, "STOP", options);
 		return -1;
-
 	case SIGALRM:
-		logger (LOG_INFO, "received SIGALRM, renewing lease");
-		switch (state->state) {
-		case STATE_BOUND:
-		case STATE_RENEWING:
-		case STATE_REBINDING:
-		case STATE_ANNOUNCING:
-			state->state = STATE_RENEW_REQUESTED;
-			break;
-		case STATE_RENEW_REQUESTED:
-		case STATE_REQUESTING:
-			state->state = STATE_INIT;
-			break;
-		}
+		logger(LOG_INFO, "received SIGALRM, renewing lease");
+		do_socket(state, SOCKET_CLOSED);
+		state->state = STATE_RENEW_REQUESTED;
+		timerclear(&state->timeout);
 		timerclear(&state->stop);
-		state->timeout = 0;
-		return 0;
-
+		return 1;
 	case SIGHUP:
-		if (state->state != STATE_BOUND &&
-		    state->state != STATE_RENEWING &&
-		    state->state != STATE_REBINDING)
+		logger(LOG_INFO, "received SIGHUP, releasing lease");
+		if (lease->addr.s_addr &&
+		    !IN_LINKLOCAL(ntohl(lease->addr.s_addr)))
 		{
-			logger(LOG_ERR,
-			       "received SIGHUP, but no lease to release");
-			return -1;
-		}
-
-		logger (LOG_INFO, "received SIGHUP, releasing lease");
-		if (!IN_LINKLOCAL(ntohl(lease->addr.s_addr))) {
 			do_socket(state, SOCKET_OPEN);
 			state->xid = arc4random();
 			send_message(state, DHCP_RELEASE, options);
@@ -768,14 +879,13 @@ handle_signal(int sig, struct if_state *state,  const struct options *options)
 		}
 		drop_config(state, "RELEASE", options);
 		return -1;
-
 	default:
 		logger (LOG_ERR,
 			"received signal %d, but don't know what to do with it",
 			sig);
 	}
 
-	return -1;
+	return 0;
 }
 
 static int bind_dhcp(struct if_state *state, const struct options *options)
@@ -783,17 +893,19 @@ static int bind_dhcp(struct if_state *state, const struct options *options)
 	struct interface *iface = state->interface;
 	struct dhcp_lease *lease = &state->lease;
 	const char *reason = NULL;
-	struct timeval tv;
+	struct timeval start, stop, diff;
 	int retval;
 
 	free(state->old);
 	state->old = state->new;
 	state->new = state->offer;
 	state->offer = NULL;
-#ifdef ENABLE_ARP
+	state->messages = 0;
 	state->conflicts = 0;
 	state->defend = 0;
-#endif
+	timerclear(&state->exit);
+	if (clock_monotonic)
+		get_monotonic(&lease->boundtime);
 
 	if (options->options & DHCPCD_INFORM) {
 		if (options->request_address.s_addr != 0)
@@ -804,17 +916,18 @@ static int bind_dhcp(struct if_state *state, const struct options *options)
 		       inet_ntoa(lease->addr));
 		state->state = STATE_BOUND;
 		state->lease.leasetime = ~0U;
+		timerclear(&state->stop);
 		reason = "INFORM";
 	} else if (IN_LINKLOCAL(htonl(state->new->yiaddr))) {
 		get_lease(lease, state->new);
 		logger(LOG_INFO, "using IPv4LL address %s",
 		       inet_ntoa(lease->addr));
 		state->state = STATE_INIT;
-		state->timeout = 0;
+		timerclear(&state->timeout);
 		reason = "IPV4LL";
 	} else {
-		if (gettimeofday(&tv, NULL) == 0)
-			lease->leasedfrom = tv.tv_sec;
+		if (gettimeofday(&start, NULL) == 0)
+			lease->leasedfrom = start.tv_sec;
 
 		get_lease(lease, state->new);
 		if (lease->frominfo)
@@ -822,55 +935,40 @@ static int bind_dhcp(struct if_state *state, const struct options *options)
 
 		if (lease->leasetime == ~0U) {
 			lease->renewaltime = lease->rebindtime = lease->leasetime;
-			state->timeout = 1; /* So we wait for infinity */
 			logger(LOG_INFO, "leased %s for infinity",
 			       inet_ntoa(lease->addr));
 			state->state = STATE_BOUND;
+			timerclear(&state->stop);
 		} else {
-			logger(LOG_INFO, "leased %s for %u seconds",
-			       inet_ntoa(lease->addr), lease->leasetime);
-
 			if (lease->rebindtime >= lease->leasetime) {
-				lease->rebindtime = (lease->leasetime * T2);
+				lease->rebindtime = lease->leasetime * T2;
 				logger(LOG_ERR,
 				       "rebind time greater than lease "
 				       "time, forcing to %u seconds",
 				       lease->rebindtime);
 			}
-
 			if (lease->renewaltime > lease->rebindtime) {
-				lease->renewaltime = (lease->leasetime * T1);
+				lease->renewaltime = lease->leasetime * T1;
 				logger(LOG_ERR,
 				       "renewal time greater than rebind time, "
 				       "forcing to %u seconds",
 				       lease->renewaltime);
 			}
-
-			if (!lease->renewaltime) {
-				lease->renewaltime = (lease->leasetime * T1);
-				logger(LOG_INFO,
-				       "no renewal time supplied, assuming %d seconds",
-				       lease->renewaltime);
-			} else
-				logger(LOG_DEBUG, "renew in %u seconds",
-				       lease->renewaltime);
-
-			if (!lease->rebindtime) {
-				lease->rebindtime = (lease->leasetime * T2);
-				logger(LOG_INFO,
-				       "no rebind time supplied, assuming %d seconds",
-				       lease->rebindtime);
-			} else
-				logger(LOG_DEBUG, "rebind in %u seconds",
-				       lease->rebindtime);
-
-			state->timeout = lease->renewaltime * 1000;
+			if (!lease->renewaltime)
+				lease->renewaltime = lease->leasetime * T1;
+			if (!lease->rebindtime)
+				lease->rebindtime = lease->leasetime * T2;
+			logger(LOG_INFO,
+			       "leased %s for %u seconds",
+			       inet_ntoa(lease->addr), lease->leasetime);
+			state->stop.tv_sec = lease->renewaltime;
+			state->stop.tv_usec = 0;
 		}
 		state->state = STATE_BOUND;
 	}
 
 	state->xid = 0;
-	timerclear(&state->stop);
+	timerclear(&state->timeout);
 	if (!reason) {
 		if (state->old) {
 			if (state->old->yiaddr == state->new->yiaddr &&
@@ -881,8 +979,18 @@ static int bind_dhcp(struct if_state *state, const struct options *options)
 		} else
 			reason = "BOUND";
 	}
+	/* If we have a monotonic clock we can safely substract the
+	 * script execution time from our timers.
+	 * Otherwise we can't as the script may update the real time. */
+	if (clock_monotonic)
+		get_monotonic(&start);
 	retval = configure(iface, reason, state->new, state->old,
 			   &state->lease, options, 1);
+	if (clock_monotonic) {
+		get_monotonic(&stop);
+		timersub(&stop, &start, &diff);
+		reduce_timers(state, &diff);
+	}
 	if (retval != 0)
 		return -1;
 	return daemonise(state, options);
@@ -895,18 +1003,15 @@ handle_timeout_fail(struct if_state *state, const struct options *options)
 	struct interface *iface = state->interface;
 	int gotlease = -1;
 	const char *reason = NULL;
-	struct timeval tv;
 
-	timerclear(&tv);
-	/* Clear our timers and counters as we've failed.
-	 * We'll either abort or move to another state with new timers */
 	timerclear(&state->stop);
-	state->messages = 0;
-	state->timeout = 0;
+	timerclear(&state->exit);
+	if (state->state != STATE_DISCOVERING)
+		state->messages = 0;
 
 	switch (state->state) {
-	case STATE_DISCOVERING:
-		/* FALLTHROUGH */
+	case STATE_INIT:	/* FALLTHROUGH */
+	case STATE_DISCOVERING: /* FALLTHROUGH */
 	case STATE_REQUESTING:
 		if (IN_LINKLOCAL(ntohl(iface->addr.s_addr))) {
 			if (!(state->options & DHCPCD_DAEMONISED))
@@ -915,7 +1020,8 @@ handle_timeout_fail(struct if_state *state, const struct options *options)
 			if (iface->addr.s_addr != 0 &&
 			    !(state->options & DHCPCD_INFORM))
 				logger(LOG_ERR, "lost lease");
-			else
+			else if (state->carrier != LINK_DOWN || 
+				!(state->options & DHCPCD_DAEMONISED)) 
 				logger(LOG_ERR, "timed out");
 		}
 		do_socket(state, SOCKET_CLOSED);
@@ -923,64 +1029,81 @@ handle_timeout_fail(struct if_state *state, const struct options *options)
 		    state->options & DHCPCD_TEST)
 			return -1;
 
-		if (state->options & DHCPCD_IPV4LL ||
-		    state->options & DHCPCD_LASTLEASE)
+		if (state->carrier != LINK_DOWN &&
+		    (state->options & DHCPCD_IPV4LL ||
+		     state->options & DHCPCD_LASTLEASE))
 			gotlease = get_old_lease(state);
 
-#ifdef ENABLE_IPV4LL
-		if (state->options & DHCPCD_IPV4LL && gotlease != 0) {
+		if (state->carrier != LINK_DOWN &&
+		    state->options & DHCPCD_IPV4LL &&
+		    gotlease != 0)
+		{
 			logger(LOG_INFO, "probing for an IPV4LL address");
 			free(state->offer);
 			state->offer = ipv4ll_get_dhcp(0);
 			gotlease = 0;
 		}
-#endif
 
-#ifdef ENABLE_ARP
 		if (gotlease == 0 &&
 		    state->offer->yiaddr != iface->addr.s_addr)
 		{
 			state->state = STATE_PROBING;
 			state->claims = 0;
 			state->probes = 0;
-			state->conflicts = 0;
-			return 0;
+			if (iface->addr.s_addr)
+				state->conflicts = 0;
+			return 1;
 		}
-#endif
 
 		if (gotlease == 0)
 			return bind_dhcp(state, options);
 
-		reason = "FAIL";
+		if (iface->addr.s_addr)
+			reason = "EXPIRE";
+		else
+			reason = "FAIL";
 		drop_config(state, reason, options);
 		if (!(state->options & DHCPCD_DAEMONISED) &&
 		    (state->options & DHCPCD_DAEMONISE))
 			return -1;
-		state->state = STATE_INIT;
+		state->state = STATE_RENEW_REQUESTED;
+		return 1;
+	case STATE_BOUND:
+		logger(LOG_INFO, "renewing lease of %s",inet_ntoa(lease->addr));
+		if (state->carrier != LINK_DOWN)
+			do_socket(state, SOCKET_OPEN);
+		state->xid = arc4random();
+		state->state = STATE_RENEWING;
+		state->stop.tv_sec = lease->rebindtime - lease->renewaltime;
 		break;
 	case STATE_RENEWING:
 		logger(LOG_ERR, "failed to renew, attempting to rebind");
-		lease->addr.s_addr = 0;
 		state->state = STATE_REBINDING;
-		tv.tv_sec = lease->rebindtime - lease->renewaltime;
+		if (lease->server.s_addr == 0)
+			state->stop.tv_sec = options->timeout;
+		else
+			state->stop.tv_sec = lease->rebindtime - \
+					     lease->renewaltime;
+		lease->server.s_addr = 0;
 		break;
 	case STATE_REBINDING:
-		logger(LOG_ERR, "failed to rebind, attempting to discover");
+		logger(LOG_ERR, "failed to rebind");
 		reason = "EXPIRE";
 		drop_config(state, reason, options);
 		state->state = STATE_INIT;
 		break;
+	case STATE_PROBING:    /* FALLTHROUGH */
+	case STATE_ANNOUNCING:
+		/* We should have lost carrier here and exit timer went */
+		logger(LOG_ERR, "timed out");
+		return -1;
 	default:
 		logger(LOG_DEBUG, "handle_timeout_failed: invalid state %d",
 		       state->state);
 	}
 
-	get_time(&state->start);
-	if (timerisset(&tv))
-		timeradd(&state->start, &tv, &state->stop);
-
 	/* This effectively falls through into the handle_timeout funtion */
-	return 0;
+	return 1;
 }
 
 static int
@@ -988,14 +1111,32 @@ handle_timeout(struct if_state *state, const struct options *options)
 {
 	struct dhcp_lease *lease = &state->lease;
 	struct interface *iface = state->interface;
-	int i;
-	struct timeval tv;
+	int i = 0;
 	struct in_addr addr;
+	struct timeval tv;
 
-#ifdef ENABLE_ARP
+	timerclear(&state->timeout);
+	if (timerneg(&state->exit))
+		return handle_timeout_fail(state, options);
+
+	if (state->state == STATE_RENEW_REQUESTED &&
+	    IN_LINKLOCAL(ntohl(lease->addr.s_addr)))
+	{
+		state->state = STATE_PROBING;
+		free(state->offer);
+		state->offer = read_lease(state->interface);
+		state->probes = 0;
+		state->claims = 0;
+	}
 	switch (state->state) {
+	case STATE_INIT_IPV4LL:
+		state->state = STATE_PROBING;
+		free(state->offer);
+		state->offer = ipv4ll_get_dhcp(0);
+		state->probes = 0;
+		state->claims = 0;
+		/* FALLTHROUGH */
 	case STATE_PROBING:
-		timerclear(&state->stop);
 		if (iface->arp_fd == -1)
 			open_socket(iface, ETHERTYPE_ARP);
 		if (state->probes < PROBE_NUM) {
@@ -1006,79 +1147,130 @@ handle_timeout(struct if_state *state, const struct options *options)
 				       inet_ntoa(addr));
 			}
 			state->probes++;
-			logger(LOG_DEBUG, "sending ARP probe #%d",
-			       state->probes);
-			if (state->probes < PROBE_NUM) 
-				state->timeout = (arc4random() %
-						  (PROBE_MAX - PROBE_MIN)) + PROBE_MIN;
-			else
-				state->timeout = ANNOUNCE_WAIT;
-			send_arp(iface, ARPOP_REQUEST, 0, state->offer->yiaddr);
+			if (state->probes < PROBE_NUM) {
+				state->timeout.tv_sec = PROBE_MIN;
+				state->timeout.tv_usec = arc4random() %
+					(PROBE_MAX_U - PROBE_MIN_U);
+				timernorm(&state->timeout);
+			} else {
+				state->timeout.tv_sec = ANNOUNCE_WAIT;
+				state->timeout.tv_usec = 0;
+			}
+			logger(LOG_DEBUG,
+			       "sending ARP probe (%d of %d), next in %0.2f seconds",
+			       state->probes, PROBE_NUM,
+			       timeval_to_double(&state->timeout));
+			if (send_arp(iface, ARPOP_REQUEST, 0,
+				     state->offer->yiaddr) == -1)
+			{
+				logger(LOG_ERR, "send_arp: %s", strerror(errno));
+				return -1;
+			}
 			return 0;
 		} else {
 			/* We've waited for ANNOUNCE_WAIT after the final probe
 			 * so the address is now ours */
-			i = bind_dhcp(state, options);
-			state->state = STATE_ANNOUNCING;
-			state->timeout = ANNOUNCE_INTERVAL;
-			return i;
+			if (IN_LINKLOCAL(htonl(state->offer->yiaddr))) {
+				i = bind_dhcp(state, options);
+				state->state = STATE_ANNOUNCING;
+				state->timeout.tv_sec = ANNOUNCE_INTERVAL;
+				state->timeout.tv_usec = 0;
+				return i;
+			}
+			state->state = STATE_REQUESTING;
 		}
+		break;
 	case STATE_ANNOUNCING:
-		timerclear(&state->stop);
+		if (iface->arp_fd == -1)
+			open_socket(iface, ETHERTYPE_ARP);
 		if (state->claims < ANNOUNCE_NUM) {
 			state->claims++;
-			logger(LOG_DEBUG, "sending ARP announce #%d",
-			       state->claims);
-			send_arp(iface, ARPOP_REQUEST,
-				 state->new->yiaddr, state->new->yiaddr);
-			if (state->claims < ANNOUNCE_NUM)
-				state->timeout = ANNOUNCE_INTERVAL;
-			else if (IN_LINKLOCAL(htonl(lease->addr.s_addr))) {
-				state->state = STATE_INIT;
-				state->timeout = 0;
-			} else {
-				state->state = STATE_BOUND;
-				state->timeout = lease->renewaltime * 1000 -
-					(ANNOUNCE_INTERVAL * ANNOUNCE_NUM);
-				close(iface->arp_fd);
-				iface->arp_fd = -1;
+			if (state->claims < ANNOUNCE_NUM) {
+				state->timeout.tv_sec = ANNOUNCE_INTERVAL;
+				state->timeout.tv_usec = 0;
+				logger(LOG_DEBUG,
+				       "sending ARP announce (%d of %d),"
+				       " next in %0.2f seconds",
+				       state->claims, ANNOUNCE_NUM,
+				       timeval_to_double(&state->timeout));
+			} else
+				logger(LOG_DEBUG,
+				       "sending ARP announce (%d of %d)",
+				       state->claims, ANNOUNCE_NUM);
+			i = send_arp(iface, ARPOP_REQUEST,
+				     state->new->yiaddr, state->new->yiaddr);
+			if (i == -1) {
+				logger(LOG_ERR, "send_arp: %s", strerror(errno));
+				return -1;
+			}
+		}
+		if (state->claims < ANNOUNCE_NUM)
+			return 0;
+		if (IN_LINKLOCAL(htonl(state->new->yiaddr))) {
+			/* We should pretend to be at the end
+			 * of the DHCP negotation cycle */
+			state->state = STATE_INIT;
+			state->messages = DHCP_MAX / DHCP_BASE;
+			state->probes = 0;
+			state->claims = 0;
+			timerclear(&state->stop);
+			goto dhcp_timeout;
+		} else {
+			state->state = STATE_BOUND;
+			close(iface->arp_fd);
+			iface->arp_fd = -1;
+			if (lease->leasetime != ~0U) {
+				state->stop.tv_sec = lease->renewaltime;
+				state->stop.tv_usec = 0;
+				if (clock_monotonic) {
+					get_monotonic(&tv);
+					timersub(&tv, &lease->boundtime, &tv);
+					timersub(&state->stop, &tv, &state->stop);
+				} else {
+					state->stop.tv_sec -=
+						(ANNOUNCE_INTERVAL * ANNOUNCE_NUM);
+				}
+				logger(LOG_DEBUG, "renew in %ld seconds",
+				       (long int)state->stop.tv_sec);
 			}
 		}
 		return 0;
 	}
-#endif
 
-	if (timerisset(&state->stop)) {
-		get_time(&tv);
-		if (timercmp(&tv, &state->stop, >))
-			return handle_timeout_fail(state, options);
-	}
-	timerclear(&tv);
+	if (timerneg(&state->stop))
+		return handle_timeout_fail(state, options);
 
 	switch (state->state) {
-	case STATE_INIT:  /* FALLTHROUGH */
 	case STATE_BOUND: /* FALLTHROUGH */
 	case STATE_RENEW_REQUESTED:
+		timerclear(&state->stop);
+		/* FALLTHROUGH */
+	case STATE_INIT:
 		do_socket(state, SOCKET_OPEN);
 		state->xid = arc4random();
-		state->messages = 0;
-		state->nakoff = 1;
 		iface->start_uptime = uptime();
-		get_time(&state->start);
-		timerclear(&state->stop);
+		break;
 	}
 
 	switch(state->state) {
-	case STATE_INIT:
-                /* 21Jul08 - was && DHCPCD_DAEMONISED */
-		if (!(state->state & DHCPCD_DAEMONISED) &&
-		    options->timeout &&		
-		    !IN_LINKLOCAL(htonl(iface->addr.s_addr)))
-		{
-			get_time(&state->start);
-			tv.tv_sec = options->timeout;
-			timeradd(&state->start, &tv, &state->stop);
+	case STATE_RENEW_REQUESTED:
+		/* If a renew was requested (ie, didn't timeout) we actually
+		 * enter the REBIND state so that we broadcast to all servers.
+		 * We need to do this for when we change networks. */
+		lease->server.s_addr = 0;
+		state->messages = 0;
+		if (lease->addr.s_addr && !(state->options & DHCPCD_INFORM)) {
+			logger(LOG_INFO, "rebinding lease of %s",
+			       inet_ntoa(lease->addr));
+			state->state = STATE_REBINDING;
+			state->stop.tv_sec = options->timeout;
+			state->stop.tv_usec = 0;
+			break;
 		}
+		/* FALLTHROUGH */
+	case STATE_INIT:
+		if (state->carrier == LINK_DOWN)
+			return 0;
 		if (lease->addr.s_addr == 0 ||
 		    IN_LINKLOCAL(ntohl(iface->addr.s_addr)))
 		{
@@ -1093,20 +1285,33 @@ handle_timeout(struct if_state *state, const struct options *options)
 			       inet_ntoa(lease->addr));
 			state->state = STATE_REQUESTING;
 		}
-		break;
-	case STATE_RENEW_REQUESTED:
-	case STATE_BOUND:
-		if (IN_LINKLOCAL(ntohl(lease->addr.s_addr))) {
-			lease->addr.s_addr = 0;
-			state->state = STATE_INIT;
-			state->timeout = 0;
-			break;
+		if (!lease->addr.s_addr && !timerisset(&state->stop)) {
+			state->stop.tv_sec = DHCP_MAX + DHCP_RAND_MIN;
+			state->stop.tv_usec = arc4random() % (DHCP_RAND_MAX_U - DHCP_RAND_MIN_U);
+			timernorm(&state->stop);
 		}
-		logger(LOG_INFO, "renewing lease of %s",inet_ntoa(lease->addr));
-		state->state = STATE_RENEWING;
 		break;
 	}
 
+dhcp_timeout:
+	if (state->carrier == LINK_DOWN) {
+		timerclear(&state->timeout);
+		return 0;
+	}
+	state->timeout.tv_sec = DHCP_BASE;
+	for (i = 0; i < state->messages; i++) {
+		state->timeout.tv_sec *= 2;
+		if (state->timeout.tv_sec > DHCP_MAX) {
+			state->timeout.tv_sec = DHCP_MAX;
+			break;
+		}
+	}
+	state->timeout.tv_sec += DHCP_RAND_MIN;
+	state->timeout.tv_usec = arc4random() %
+		(DHCP_RAND_MAX_U - DHCP_RAND_MIN_U);
+	timernorm(&state->timeout);
+
+	/* We send the message here so that the timeout is reported */
 	switch (state->state) {
 	case STATE_DISCOVERING:
 		send_message(state, DHCP_DISCOVER, options);
@@ -1119,111 +1324,155 @@ handle_timeout(struct if_state *state, const struct options *options)
 		/* FALLTHROUGH */
 	case STATE_RENEWING:   /* FALLTHROUGH */
 	case STATE_REBINDING:
+		if (iface->raw_fd == -1)
+			do_socket(state, SOCKET_OPEN);
 		send_message(state, DHCP_REQUEST, options);
 		break;
 	}
 
-	state->timeout = DHCP_BASE;
-	for (i = 1; i < state->messages; i++) {
-		state->timeout *= 2;
-		if (state->timeout > DHCP_MAX) {
-			state->timeout = DHCP_MAX;
-			break;
-		}
-	}
-	state->timeout += (arc4random() % (DHCP_RAND_MAX - DHCP_RAND_MIN)) +
-		DHCP_RAND_MIN;
 	return 0;
+}
+
+static void
+log_dhcp(int lvl, const char *msg, const struct dhcp_message *dhcp)
+{
+	char *a;
+	struct in_addr addr;
+	int r;
+
+	if (strcmp(msg, "NAK:") == 0)
+		a = get_option_string(dhcp, DHO_MESSAGE);
+	else {
+		addr.s_addr = dhcp->yiaddr;
+		a = xstrdup(inet_ntoa(addr));
+	}
+	r = get_option_addr(&addr.s_addr, dhcp, DHO_SERVERID);
+	if (dhcp->servername[0] && r == 0)
+		logger(lvl, "%s %s from %s `%s'", msg, a,
+		       inet_ntoa(addr), dhcp->servername);
+	else if (r == 0)
+		logger(lvl, "%s %s from %s", msg, a, inet_ntoa(addr));
+	else
+		logger(lvl, "%s %s", msg, a);
+	free(a);
 }
 
 static int
 handle_dhcp(struct if_state *state, struct dhcp_message **dhcpp,
 	    const struct options *options)
 {
-	struct timespec ts;
 	struct dhcp_message *dhcp = *dhcpp;
 	struct interface *iface = state->interface;
 	struct dhcp_lease *lease = &state->lease;
-	char *addr;
-	struct in_addr saddr;
-	uint8_t type;
+	uint8_t type, tmp;
+	struct in_addr addr;
+	size_t i;
 	int r;
-
-	if (get_option_uint8(&type, dhcp, DHCP_MESSAGETYPE) == -1) {
-		logger(LOG_ERR, "no DHCP type in message");
-		return -1;
-	}
 
 	/* reset the message counter */
 	state->messages = 0;
 
+	/* We have to have DHCP type to work */
+	if (get_option_uint8(&type, dhcp, DHO_MESSAGETYPE) == -1) {
+		log_dhcp(LOG_ERR, "no DHCP type in", dhcp);
+		return 0;
+	}
+
+	/* Ensure that it's not from a blacklisted server.
+	 * We should expand this to check IP and/or hardware address
+	 * at the packet level. */
+	if (options->blacklist_len != 0 &&
+	    get_option_addr(&addr.s_addr, dhcp, DHO_SERVERID) == 0)
+	{
+		for (i = 0; i < options->blacklist_len; i++) {
+			if (options->blacklist[i] != addr.s_addr)
+				continue;
+			if (dhcp->servername[0])
+				logger(LOG_WARNING,
+				       "ignoring blacklisted server %s `%s'",
+					inet_ntoa(addr), dhcp->servername);
+			else
+				logger(LOG_WARNING,
+				       "ignoring blacklisted server %s",
+				       inet_ntoa(addr));
+			return 0;
+		}
+	}
+
 	/* We should restart on a NAK */
 	if (type == DHCP_NAK) {
-		addr = get_option_string(dhcp, DHCP_MESSAGE);
-		logger(LOG_WARNING, "received NAK: %s", addr);
-		free(addr);
+		log_dhcp(LOG_WARNING, "NAK:", dhcp);
+		drop_config(state, "EXPIRE", options);
+		do_socket(state, SOCKET_CLOSED);
 		state->state = STATE_INIT;
-		state->timeout = 0;
-		lease->addr.s_addr = 0;
-		timerclear(&state->stop);
-
 		/* If we constantly get NAKS then we should slowly back off */
-		if (state->nakoff > 0) {
-			logger(LOG_DEBUG, "sleeping for %lu seconds",
-			       (unsigned long)state->nakoff);
-			ts.tv_sec = state->nakoff;
-			ts.tv_nsec = 0;
+		if (state->nakoff == 0) {
+			state->nakoff = 1;
+			timerclear(&state->timeout);
+		} else {
+			state->timeout.tv_sec = state->nakoff;
+			state->timeout.tv_usec = 0;
 			state->nakoff *= 2;
 			if (state->nakoff > NAKOFF_MAX)
 				state->nakoff = NAKOFF_MAX;
-			nanosleep(&ts, NULL);
-		}
-
+		} 
 		return 0;
 	}
 
 	/* No NAK, so reset the backoff */
 	state->nakoff = 1;
 
-	if (type == DHCP_OFFER && state->state == STATE_DISCOVERING) {
-		lease->addr.s_addr = dhcp->yiaddr;
-		addr = xstrdup(inet_ntoa(lease->addr));
-		r = get_option_addr(&lease->server.s_addr, dhcp, DHCP_SERVERID);
-		if (dhcp->servername[0] && r == 0)
-			logger(LOG_INFO, "offered %s from %s `%s'",
-			       addr, inet_ntoa(lease->server),
-			       dhcp->servername);
-		else if (r == 0)
-			logger(LOG_INFO, "offered %s from %s",
-			       addr, inet_ntoa(lease->server));
-		else
-			logger(LOG_INFO, "offered %s", addr);
-		free(addr);
-
-		if (state->options & DHCPCD_TEST) {
-			exec_script(options, iface->name, "TEST", dhcp, NULL);
-			free(dhcp);
+	/* Ensure that all required options are present */
+	for (i = 1; i < 255; i++) {
+		if (has_option_mask(options->requiremask, i) &&
+		    get_option_uint8(&tmp, dhcp, i) != 0)
+		{
+			log_dhcp(LOG_WARNING, "reject", dhcp);
 			return 0;
 		}
+	}
 
-		free(dhcp);
+	if (type == DHCP_OFFER && state->state == STATE_DISCOVERING) {
+		lease->addr.s_addr = dhcp->yiaddr;
+		get_option_addr(&lease->server.s_addr, dhcp, DHO_SERVERID);
+		log_dhcp(LOG_INFO, "offered", dhcp);
+		if (state->options & DHCPCD_TEST) {
+			run_script(options, iface->name, "TEST", dhcp, NULL);
+			/* Fake the fact we forked so we return 0 to userland */
+			state->options |= DHCPCD_FORKED;
+			return -1;
+		}
+		free(state->offer);
+		state->offer = dhcp;
+		*dhcpp = NULL;
+		timerclear(&state->timeout);
+		if (state->options & DHCPCD_ARP &&
+		    iface->addr.s_addr != state->offer->yiaddr)
+		{
+			/* If the interface already has the address configured
+			 * then we can't ARP for duplicate detection. */
+			addr.s_addr = state->offer->yiaddr;
+			if (!has_address(iface->name, &addr, NULL)) {
+				state->state = STATE_PROBING;
+				state->claims = 0;
+				state->probes = 0;
+				state->conflicts = 0;
+				timerclear(&state->stop);
+				return 1;
+			}
+		}
 		state->state = STATE_REQUESTING;
-		state->timeout = 0;
-		return 0;
+		return 1;
 	}
 
 	if (type == DHCP_OFFER) {
-		saddr.s_addr = dhcp->yiaddr;
-		logger(LOG_INFO, "got subsequent offer of %s, ignoring ",
-		       inet_ntoa(saddr));
-		free(dhcp);
+		log_dhcp(LOG_INFO, "ignoring offer of", dhcp);
 		return 0;
 	}
 
 	/* We should only be dealing with acks */
 	if (type != DHCP_ACK) {
-		logger(LOG_ERR, "%d not an ACK or OFFER", type);
-		free(dhcp);
+		log_dhcp(LOG_ERR, "not ACK or OFFER", dhcp);
 		return 0;
 	}
 	    
@@ -1233,35 +1482,30 @@ handle_dhcp(struct if_state *state, struct dhcp_message **dhcpp,
 	case STATE_RENEWING:
 	case STATE_REBINDING:
 		if (!(state->options & DHCPCD_INFORM)) {
-			saddr.s_addr = dhcp->yiaddr;
-			logger(LOG_INFO, "lease of %s acknowledged",
-			       inet_ntoa(saddr));
+			get_option_addr(&lease->server.s_addr,
+					dhcp, DHO_SERVERID);
+			log_dhcp(LOG_INFO, "acknowledged", dhcp);
 		}
+		free(state->offer);
+		state->offer = dhcp;
+		*dhcpp = NULL;
 		break;
 	default:
 		logger(LOG_ERR, "wrong state %d", state->state);
 	}
 
 	do_socket(state, SOCKET_CLOSED);
-	free(state->offer);
-	state->offer = dhcp;
-	*dhcpp = NULL;
-
-#ifdef ENABLE_ARP
-	if (state->options & DHCPCD_ARP &&
-	    iface->addr.s_addr != state->offer->yiaddr)
-	{
-		state->state = STATE_PROBING;
-		state->timeout = 0;
-		state->claims = 0;
-		state->probes = 0;
-		state->conflicts = 0;
-		timerclear(&state->stop);
-		return 0;
+	r = bind_dhcp(state, options);
+	if (!(state->options & DHCPCD_ARP)) {
+		if (!(state->options & DHCPCD_INFORM))
+			logger(LOG_DEBUG, "renew in %ld seconds",
+			       (long int)state->stop.tv_sec);
+		return r;
 	}
-#endif
-
-	return bind_dhcp(state, options);		
+	state->state = STATE_ANNOUNCING;
+	if (state->options & DHCPCD_FORKED)
+		return r;
+	return 1;
 }
 
 static int
@@ -1269,7 +1513,7 @@ handle_dhcp_packet(struct if_state *state, const struct options *options)
 {
 	uint8_t *packet;
 	struct interface *iface = state->interface;
-	struct dhcp_message *dhcp;
+	struct dhcp_message *dhcp = NULL;
 	const uint8_t *pp;
 	uint8_t *p;
 	ssize_t bytes;
@@ -1279,7 +1523,6 @@ handle_dhcp_packet(struct if_state *state, const struct options *options)
 	 * The benefit is that if we get >1 DHCP packet in our buffer and
 	 * the first one fails for any reason, we can use the next. */
 	packet = xmalloc(udp_dhcp_len);
-	dhcp = xmalloc(sizeof(*dhcp));
 	for(;;) {
 		bytes = get_raw_packet(iface, ETHERTYPE_IP,
 				       packet, udp_dhcp_len);
@@ -1296,11 +1539,14 @@ handle_dhcp_packet(struct if_state *state, const struct options *options)
 			logger(LOG_ERR, "packet greater than DHCP size");
 			continue;
 		}
+		if (!dhcp)
+			dhcp = xmalloc(sizeof(*dhcp));
 		memcpy(dhcp, pp, bytes);
 		if (dhcp->cookie != htonl(MAGIC_COOKIE)) {
 			logger(LOG_DEBUG, "bogus cookie, ignoring");
 			continue;
 		}
+		/* Ensure it's the right transaction */
 		if (state->xid != dhcp->xid) {
 			logger(LOG_DEBUG,
 			       "ignoring packet with xid 0x%x as"
@@ -1308,25 +1554,28 @@ handle_dhcp_packet(struct if_state *state, const struct options *options)
 			       dhcp->xid, state->xid);
 			continue;
 		}
+		/* Ensure packet is for us */
+		if (iface->hwlen <= sizeof(dhcp->chaddr) &&
+		    memcmp(dhcp->chaddr, iface->hwaddr, iface->hwlen))
+		{
+			logger(LOG_DEBUG, "xid 0x%x is not for our hwaddr %s",
+			       dhcp->xid,
+			       hwaddr_ntoa(dhcp->chaddr, sizeof(dhcp->chaddr)));
+			continue;
+		}
 		/* We should ensure that the packet is terminated correctly
 		 * if we have space for the terminator */
 		if ((size_t)bytes < sizeof(struct dhcp_message)) {
 			p = (uint8_t *)dhcp + bytes - 1;
-			while (p > dhcp->options && *p == DHCP_PAD)
+			while (p > dhcp->options && *p == DHO_PAD)
 				p--;
-			if (*p != DHCP_END)
-				*++p = DHCP_END;
+			if (*p != DHO_END)
+				*++p = DHO_END;
 		}
-		free(packet);
-		if (handle_dhcp(state, &dhcp, options) == 0) {
-			/* Fake the fact we forked so we return 0 to userland */
-			if (state->options & DHCPCD_TEST)
-				state->options |= DHCPCD_FORKED;
-			else
-				return 0;
-		}
-		if (state->options & DHCPCD_FORKED)
-			return -1;
+		retval = handle_dhcp(state, &dhcp, options);
+		if (retval == 0 && state->options & DHCPCD_TEST)
+			state->options |= DHCPCD_FORKED;
+		break;
 	}
 
 	free(packet);
@@ -1334,7 +1583,6 @@ handle_dhcp_packet(struct if_state *state, const struct options *options)
 	return retval;
 }
 
-#ifdef ENABLE_ARP
 static int
 handle_arp_packet(struct if_state *state)
 {
@@ -1347,7 +1595,6 @@ handle_arp_packet(struct if_state *state)
 	struct interface *iface = state->interface;
 
 	state->fail.s_addr = 0;
-
 	for(;;) {
 		bytes = get_raw_packet(iface, ETHERTYPE_ARP,
 				       arp_reply, sizeof(arp_reply));
@@ -1373,6 +1620,10 @@ handle_arp_packet(struct if_state *state)
 		/* Ensure we got all the data */
 		if ((hw_t + reply.ar_hln + reply.ar_pln) - arp_reply > bytes)
 			continue;
+		/* Ignore messages from ourself */
+		if (reply.ar_hln == iface->hwlen &&
+		    memcmp(hw_s, iface->hwaddr, iface->hwlen) == 0)
+			continue;
 		/* Copy out the IP addresses */
 		memcpy(&reply_s, hw_s + reply.ar_hln, reply.ar_pln);
 		memcpy(&reply_t, hw_t + reply.ar_hln, reply.ar_pln);
@@ -1380,19 +1631,13 @@ handle_arp_packet(struct if_state *state)
 		/* Check for conflict */
 		if (state->offer && 
 		    (reply_s == state->offer->yiaddr ||
-		     (reply_t == state->offer->yiaddr &&
-		      reply.ar_op == htons(ARPOP_REQUEST) &&
-		      (iface->hwlen != reply.ar_hln ||
-		       memcmp(hw_s, iface->hwaddr, iface->hwlen) != 0))))
+		     (reply_s == 0 && reply_t == state->offer->yiaddr)))
 			state->fail.s_addr = state->offer->yiaddr;
 
 		/* Handle IPv4LL conflicts */
 		if (IN_LINKLOCAL(htonl(iface->addr.s_addr)) &&
 		    (reply_s == iface->addr.s_addr ||
-		     (reply_t == iface->addr.s_addr &&
-		      reply.ar_op == htons(ARPOP_REQUEST) &&
-		      (iface->hwlen != reply.ar_hln ||
-		       memcmp(hw_s, iface->hwaddr, iface->hwlen) != 0))))
+		     (reply_s == 0 && reply_t == iface->addr.s_addr)))
 			state->fail.s_addr = iface->addr.s_addr;
 
 		if (state->fail.s_addr) {
@@ -1409,78 +1654,118 @@ handle_arp_packet(struct if_state *state)
 static int
 handle_arp_fail(struct if_state *state, const struct options *options)
 {
-	struct timespec ts;
 	time_t up;
+	int cookie = state->offer->cookie;
 
-	if (IN_LINKLOCAL(htonl(state->fail.s_addr))) {
-		if (state->fail.s_addr == state->interface->addr.s_addr) {
-			up = uptime();
-			if (state->defend + DEFEND_INTERVAL > up) {
-				drop_config(state, "FAIL", options);
-				state->state = STATE_PROBING;
-				state->timeout = 0;
-				state->claims = 0;
-				state->probes = 0;
-				state->conflicts = 0;
-				timerclear(&state->stop);
-			} else
-				state->defend = up;
-			return 0;
-		}
-
-		timerclear(&state->stop);
-		state->conflicts++;
-		state->timeout = 0;
-		state->claims = 0;
-		state->probes = 0;
-		state->state = STATE_PROBING;
+	if (!IN_LINKLOCAL(htonl(state->fail.s_addr))) {
+		state->state = STATE_INIT;
 		free(state->offer);
-		if (state->conflicts > MAX_CONFLICTS) {
-			/* RFC 3927 says we should rate limit */
-			logger(LOG_INFO, "sleeping for %d seconds",
-			       RATE_LIMIT_INTERVAL);
-			ts.tv_sec = RATE_LIMIT_INTERVAL;
-			ts.tv_nsec = 0;
-			nanosleep(&ts, NULL);
-		}
-		state->offer = ipv4ll_get_dhcp(0);
+		state->offer = NULL;
+		state->lease.addr.s_addr = 0;
+		if (!cookie)
+			return 1;
+		state->timeout.tv_sec = DHCP_ARP_FAIL;
+		state->timeout.tv_usec = 0;
+		do_socket(state, SOCKET_OPEN);
+		send_message(state, DHCP_DECLINE, options);
+		do_socket(state, SOCKET_CLOSED);
 		return 0;
 	}
 
-	do_socket(state, SOCKET_OPEN);
-	send_message(state, DHCP_DECLINE, options);
-	state->timeout = 0;
-	state->state = STATE_INIT;
-	/* RFC 2131 says that we should wait for 10 seconds
-	 * before doing anything else */
-	logger(LOG_INFO, "sleeping for 10 seconds");
-	ts.tv_sec = 10;
-	ts.tv_nsec = 0;
-	nanosleep(&ts, NULL);
+	if (state->fail.s_addr == state->interface->addr.s_addr) {
+		if (state->state == STATE_PROBING)
+			/* This should only happen when SIGALRM or
+			 * link when down/up and we have a conflict. */
+			drop_config(state, "EXPIRE", options);
+		else {
+			up = uptime();
+			if (state->defend + DEFEND_INTERVAL > up) {
+				drop_config(state, "EXPIRE", options);
+				state->conflicts = -1;
+				/* drop through to set conflicts to 0 */
+			} else {
+				state->defend = up;
+				return 0;
+			}
+		}
+	}
+	do_socket(state, SOCKET_CLOSED);
+	state->conflicts++;
+	timerclear(&state->stop);
+	if (state->conflicts > MAX_CONFLICTS) {
+		logger(LOG_ERR, "failed to obtain an IPv4LL address");
+		state->state = STATE_INIT;
+		timerclear(&state->timeout);
+		if (!(state->options & DHCPCD_DAEMONISED) &&
+		    (state->options & DHCPCD_DAEMONISE))
+			return -1;
+		return 1;
+	}
+	state->state = STATE_INIT_IPV4LL;
+	state->timeout.tv_sec = PROBE_WAIT;
+	state->timeout.tv_usec = 0;
 	return 0;
 }
-#endif
+
+static int
+handle_link(struct if_state *state)
+{
+	int retval;
+
+	retval = link_changed(state->interface);
+	if (retval == -1) {
+		logger(LOG_ERR, "link_changed: %s", strerror(errno));
+		return -1;
+	}
+	if (retval == 0)
+		return 0;
+
+	timerclear(&state->timeout);
+	switch (carrier_status(state->interface->name)) {
+	case -1:
+		logger(LOG_ERR, "carrier_status: %s", strerror(errno));
+		return -1;
+	case 0:
+		if (state->carrier != LINK_DOWN) {
+			logger(LOG_INFO, "carrier lost");
+			state->carrier = LINK_DOWN;
+			do_socket(state, SOCKET_CLOSED);
+			if (state->state != STATE_BOUND)
+				timerclear(&state->stop);
+		}
+		break;
+	default:
+		if (state->carrier != LINK_UP) {
+			logger(LOG_INFO, "carrier acquired");
+			state->state = STATE_RENEW_REQUESTED;
+			state->carrier = LINK_UP;
+			timerclear(&state->stop);
+			return 1;
+		}
+		break;
+	}
+	return 0;
+}
 
 int
 dhcp_run(const struct options *options, int *pid_fd)
 {
 	struct interface *iface;
 	struct if_state *state = NULL;
-	int retval = -1;
-	int sig;
+	int fd = -1, r = 0, sig;
 
 	iface = read_interface(options->interface, options->metric);
 	if (!iface) {
 		logger(LOG_ERR, "read_interface: %s", strerror(errno));
 		goto eexit;
 	}
-
-	logger(LOG_INFO, "hardware address = %s",
+	logger(LOG_DEBUG, "hardware address = %s",
 	       hwaddr_ntoa(iface->hwaddr, iface->hwlen));
-
 	state = xzalloc(sizeof(*state));
 	state->pid_fd = pid_fd;
 	state->interface = iface;
+	if (!(options->options & DHCPCD_TEST))
+		run_script(options, iface->name, "PREINIT", NULL, NULL);
 
 	if (client_setup(state, options) == -1)
 		goto eexit;
@@ -1488,42 +1773,51 @@ dhcp_run(const struct options *options, int *pid_fd)
 		goto eexit;
 	if (signal_setup() == -1)
 		goto eexit;
-
 	state->signal_fd = signal_fd();
 
+	if (state->options & DHCPCD_BACKGROUND &&
+	    !(state->options & DHCPCD_DAEMONISED))
+		if (daemonise(state, options) == -1)
+			goto eexit;
+
+	if (state->carrier == LINK_DOWN)
+		logger(LOG_INFO, "waiting for carrier");
+
 	for (;;) {
-		retval = wait_for_packet(state);
-
-		/* We should always handle our signals first */
-		if ((sig = (signal_read(state->signal_fd))) != -1) {
-			retval = handle_signal(sig, state, options);
-		} else if (retval == 0)
-			retval = handle_timeout(state, options);
-		else if (retval == -1) {
-			if (errno == EINTR)
-				/* The interupt will be handled above */
-				retval = 0;
-		} else if (retval > 0) {
-			if (fd_hasdata(state->interface->fd) == 1)
-				retval = handle_dhcp_packet(state, options);
-#ifdef ENABLE_ARP
-			else if (fd_hasdata(state->interface->arp_fd) == 1) {
-				retval = handle_arp_packet(state);
-				if (retval == -1)
-					retval = handle_arp_fail(state, options);
-			}
-#endif
-			else
-				retval = 0;
+		if (r == 0)
+			r = handle_timeout(state, options);
+		else if (r > 0) {
+			if (fd == state->signal_fd) {
+			    	if ((sig = signal_read()) != -1)
+					r = handle_signal(sig, state, options);
+			} else if (fd == iface->link_fd)
+				r = handle_link(state);
+			else if (fd == iface->raw_fd)
+				r = handle_dhcp_packet(state, options);
+			else if (fd == iface->arp_fd) {
+				if ((r = handle_arp_packet(state)) == -1)
+					r = handle_arp_fail(state, options);
+			} else
+				r = 0;
 		}
-
-		if (retval != 0)
+		if (r == -1)
 			break;
+		if (r == 0) {
+			fd = -1;
+			r = wait_for_fd(state, &fd);
+			if (r == -1 && errno == EINTR) {
+				r = 1;
+				fd = state->signal_fd;
+			}
+		} else
+			r = 0;
 	}
 
 eexit:
 	if (iface) {
 		do_socket(state, SOCKET_CLOSED);
+		if (iface->link_fd != -1)
+		    close(iface->link_fd);
 		free_routes(iface->routes);
 		free(iface->clientid);
 		free(iface->buffer);
@@ -1532,7 +1826,7 @@ eexit:
 
 	if (state) {
 		if (state->options & DHCPCD_FORKED)
-			retval = 0;
+			r = 0;
 		if (state->options & DHCPCD_DAEMONISED)
 			unlink(options->pidfile);
 		free(state->offer);
@@ -1541,5 +1835,5 @@ eexit:
 		free(state);
 	}
 
-	return retval;
+	return r;
 }

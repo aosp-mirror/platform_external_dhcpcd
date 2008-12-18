@@ -48,22 +48,50 @@
 
 #define DEFAULT_PATH	"PATH=/usr/bin:/usr/sbin:/bin:/sbin"
 
+
+static int
+exec_script(char *const *argv, char *const *env)
+{
+	pid_t pid;
+	sigset_t full;
+	sigset_t old;
+
+	/* OK, we need to block signals */
+	sigfillset(&full);
+	sigprocmask(SIG_SETMASK, &full, &old);
+	signal_reset();
+
+	switch (pid = vfork()) {
+	case -1:
+		logger(LOG_ERR, "vfork: %s", strerror(errno));
+		break;
+	case 0:
+		sigprocmask(SIG_SETMASK, &old, NULL);
+		execve(argv[0], argv, env);
+		logger(LOG_ERR, "%s: %s", argv[0], strerror(errno));
+		_exit(127);
+		/* NOTREACHED */
+	}
+
+	/* Restore our signals */
+	signal_setup();
+	sigprocmask(SIG_SETMASK, &old, NULL);
+	return pid;
+}
+
 int
-exec_script(const struct options *options, const char *iface,
-	    const char *reason,
-	    const struct dhcp_message *dhcpn, const struct dhcp_message *dhcpo)
+run_script(const struct options *options, const char *iface,
+           const char *reason,
+           const struct dhcp_message *dhcpn, const struct dhcp_message *dhcpo)
 {
 	char *const argv[2] = { UNCONST(options->script), NULL };
 	char **env = NULL, **ep;
 	char *path;
 	ssize_t e, elen;
-	int ret = 0;
 	pid_t pid;
 	int status = 0;
-	sigset_t full;
-	sigset_t old;
 
-	logger(LOG_DEBUG, "executing `%s'", options->script);
+	logger(LOG_DEBUG, "executing `%s', reason %s", options->script, reason);
 
 	/* Make our env */
 	elen = 5;
@@ -115,50 +143,17 @@ exec_script(const struct options *options, const char *iface,
 	}
 	env[elen] = '\0';
 
-	/* OK, we need to block signals */
-	sigfillset(&full);
-	sigprocmask(SIG_SETMASK, &full, &old);
-
-#ifdef THERE_IS_NO_FORK
-	signal_reset();
-	pid = vfork();
-#else
-	pid = fork();
-#endif
-
-	switch (pid) {
-	case -1:
-#ifdef THERE_IS_NO_FORK
-		logger(LOG_ERR, "vfork: %s", strerror(errno));
-#else
-		logger(LOG_ERR, "fork: %s", strerror(errno));
-#endif
-		ret = -1;
-		break;
-	case 0:
-#ifndef THERE_IS_NO_FORK
-		signal_reset();
-#endif
-		sigprocmask(SIG_SETMASK, &old, NULL);
-		execve(options->script, argv, env);
-		logger(LOG_ERR, "%s: %s", options->script, strerror(errno));
-		_exit(111);
-		/* NOTREACHED */
-	}
-
-#ifdef THERE_IS_NO_FORK
-	signal_setup();
-#endif
-
-	/* Restore our signals */
-	sigprocmask(SIG_SETMASK, &old, NULL);
-
-	/* Wait for the script to finish */
-	while (waitpid(pid, &status, 0) == -1) {
-		if (errno != EINTR) {
-			logger(LOG_ERR, "waitpid: %s", strerror(errno));
-			status = -1;
-			break;
+	pid = exec_script(argv, env);
+	if (pid == -1)
+		status = -1;
+	else if (pid != 0) {
+		/* Wait for the script to finish */
+		while (waitpid(pid, &status, 0) == -1) {
+			if (errno != EINTR) {
+				logger(LOG_ERR, "waitpid: %s", strerror(errno));
+				status = -1;
+				break;
+			}
 		}
 	}
 
@@ -167,7 +162,6 @@ exec_script(const struct options *options, const char *iface,
 	while (*ep)
 		free(*ep++);
 	free(env);
-
 	return status;
 }
 
@@ -193,14 +187,13 @@ delete_route(const char *iface, struct rt *rt, int metric)
 	int retval;
 
 	addr = xstrdup(inet_ntoa(rt->dest));
-	logger(LOG_DEBUG, "removing route %s/%d via %s",
-			addr, inet_ntocidr(rt->net), inet_ntoa(rt->gate));
+	logger(LOG_DEBUG, "deleting route %s/%d via %s",
+	       addr, inet_ntocidr(rt->net), inet_ntoa(rt->gate));
 	free(addr);
 	retval = del_route(iface, &rt->dest, &rt->net, &rt->gate, metric);
-	if (retval != 0)
+	if (retval != 0 && errno != ENOENT && errno != ESRCH)
 		logger(LOG_ERR," del_route: %s", strerror(errno));
 	return retval;
-
 }
 
 static int
@@ -245,22 +238,9 @@ configure_routes(struct interface *iface, const struct dhcp_message *dhcp,
 	int retval = 0;
 	char *addr;
 
-#ifdef THERE_IS_NO_FORK
-	char *skipp;
-	size_t skiplen;
-	int skip = 0;
-
-	free(dhcpcd_skiproutes);
-	/* We can never have more than 255 routes. So we need space
-	 * for 255 3 digit numbers and commas */
-	skiplen = 255 * 4 + 1;
-	skipp = dhcpcd_skiproutes = xmalloc(sizeof(char) * skiplen);
-	*skipp = '\0';
-#endif
-
 	ort = get_option_routes(dhcp);
 
-#ifdef ENABLE_IPV4LL_ALWAYSROUTE
+#ifdef IPV4LL_ALWAYSROUTE
 	if (options->options & DHCPCD_IPV4LL &&
 	    IN_PRIVATE(ntohl(dhcp->yiaddr)))
 	{
@@ -284,43 +264,6 @@ configure_routes(struct interface *iface, const struct dhcp_message *dhcp,
 			else
 				ort = rt;
 		}
-	}
-#endif
-
-#ifdef THERE_IS_NO_FORK
-	if (dhcpcd_skiproutes) {
-		int i = -1;
-		char *sk, *skp, *token;
-		free_routes(iface->routes);
-		for (rt = ort; rt; rt = rt->next) {
-			i++;
-			/* Check that we did add this route or not */
-			sk = skp = xstrdup(dhcpcd_skiproutes);
-			while ((token = strsep(&skp, ","))) {
-				if (isdigit((unsigned char)*token) &&
-				    atoi(token) == i)
-					break;
-			}
-			free(sk);
-			if (token)
-				continue;
-			if (nr) {
-				rtn->next = xmalloc(sizeof(*rtn));
-				rtn = rtn->next;
-			} else {
-				nr = rtn = xmalloc(sizeof(*rtn));
-			}
-			rtn->dest.s_addr = rt->dest.s_addr;
-			rtn->net.s_addr = rt->net.s_addr;
-			rtn->gate.s_addr = rt->gate.s_addr;
-			rtn->next = NULL;
-		}
-		iface->routes = nr;
-		nr = NULL;
-
-		/* We no longer need this */
-		free(dhcpcd_skiproutes);
-		dhcpcd_skiproutes = NULL;
 	}
 #endif
 
@@ -370,37 +313,25 @@ configure_routes(struct interface *iface, const struct dhcp_message *dhcp,
 			rtn->gate.s_addr = rt->gate.s_addr;
 			rtn->next = NULL;
 		}
-#ifdef THERE_IS_NO_FORK
-		/* If we have daemonised yet we need to record which routes
-		 * we failed to add so we can skip them */
-		else if (!(options->options & DHCPCD_DAEMONISED)) {
-			/* We can never have more than 255 / 4 routes,
-			 * so 3 chars is plently */
-			printf("foo\n");
-			if (*skipp)
-				*skipp++ = ',';
-			skipp += snprintf(skipp,
-					  dhcpcd_skiproutes + skiplen - skipp,
-					  "%d", skip);
-		}
-		skip++;
-#endif
 	}
 	free_routes(ort);
 	free_routes(iface->routes);
 	iface->routes = nr;
+	return retval;
+}
 
-#ifdef THERE_IS_NO_FORK
-	if (dhcpcd_skiproutes) {
-		if (*dhcpcd_skiproutes)
-			*skipp = '\0';
-		else {
-			free(dhcpcd_skiproutes);
-			dhcpcd_skiproutes = NULL;
-		}
-	}
-#endif
-
+static int
+delete_address(struct interface *iface)
+{
+	int retval;
+	logger(LOG_DEBUG, "deleting IP address %s/%d",
+	       inet_ntoa(iface->addr),
+	       inet_ntocidr(iface->net));
+	retval = del_address(iface->name, &iface->addr, &iface->net);
+	if (retval == -1 && errno != EADDRNOTAVAIL) 
+		logger(LOG_ERR, "del_address: %s", strerror(errno));
+	iface->addr.s_addr = 0;
+	iface->net.s_addr = 0;
 	return retval;
 }
 
@@ -419,14 +350,16 @@ configure(struct interface *iface, const char *reason,
 #endif
 
 	/* Grab our IP config */
-	if (dhcp == NULL || dhcp->yiaddr == 0)
+	if (dhcp == NULL)
 		up = 0;
 	else {
 		addr.s_addr = dhcp->yiaddr;
+		if (addr.s_addr == 0)
+			addr.s_addr = lease->addr.s_addr;
 		/* Ensure we have all the needed values */
-		if (get_option_addr(&net.s_addr, dhcp, DHCP_SUBNETMASK) == -1)
+		if (get_option_addr(&net.s_addr, dhcp, DHO_SUBNETMASK) == -1)
 			net.s_addr = get_netmask(addr.s_addr);
-		if (get_option_addr(&brd.s_addr, dhcp, DHCP_BROADCAST) == -1)
+		if (get_option_addr(&brd.s_addr, dhcp, DHO_BROADCAST) == -1)
 			brd.s_addr = addr.s_addr | ~net.s_addr;
 	}
 
@@ -435,19 +368,10 @@ configure(struct interface *iface, const char *reason,
 		/* Only reset things if we had set them before */
 		if (iface->addr.s_addr != 0) {
 			delete_routes(iface, options->metric);
-			logger(LOG_DEBUG, "deleting IP address %s/%d",
-			       inet_ntoa(iface->addr),
-			       inet_ntocidr(iface->net));
-			if (del_address(iface->name, &iface->addr,
-					&iface->net) == -1 &&
-			    errno != ENOENT) 
-				logger(LOG_ERR, "del_address: %s",
-				       strerror(errno));
-			iface->addr.s_addr = 0;
-			iface->net.s_addr = 0;
+			delete_address(iface);
 		}
 
-		exec_script(options, iface->name, reason, NULL, old);
+		run_script(options, iface->name, reason, NULL, old);
 		return 0;
 	}
 
@@ -466,8 +390,8 @@ configure(struct interface *iface, const char *reason,
 
 	/* Now delete the old address if different */
 	if (iface->addr.s_addr != addr.s_addr &&
-	    iface->addr.s_addr != 0) 
-		del_address(iface->name, &iface->addr, &iface->net);
+	    iface->addr.s_addr != 0)
+		delete_address(iface);
 
 #ifdef __linux__
 	/* On linux, we need to change the subnet route to have our metric. */
@@ -491,6 +415,6 @@ configure(struct interface *iface, const char *reason,
 		if (write_lease(iface, dhcp) == -1)
 			logger(LOG_ERR, "write_lease: %s", strerror(errno));
 
-	exec_script(options, iface->name, reason, dhcp, old);
+	run_script(options, iface->name, reason, dhcp, old);
 	return 0;
 }

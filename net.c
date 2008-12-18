@@ -43,6 +43,9 @@
 #define __FAVOR_BSD /* Nasty glibc hack so we can use BSD semantics for UDP */
 #include <netinet/udp.h>
 #undef __FAVOR_BSD
+#ifdef SIOCGIFMEDIA
+#include <net/if_media.h>
+#endif
 #include <arpa/inet.h>
 #ifdef AF_LINK
 # include <net/if_dl.h>
@@ -50,7 +53,6 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <poll.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -79,7 +81,7 @@ inet_ntocidr(struct in_addr address)
 }
 
 int
-inet_cidrtoaddr (int cidr, struct in_addr *addr)
+inet_cidrtoaddr(int cidr, struct in_addr *addr)
 {
 	int ocets;
 
@@ -181,7 +183,7 @@ do_interface(const char *ifname,
 {
 	int s;
 	struct ifconf ifc;
-	int retval = 0;
+	int retval = 0, found = 0;
 	int len = 10 * sizeof(struct ifreq);
 	int lastlen = 0;
 	char *p;
@@ -192,9 +194,8 @@ do_interface(const char *ifname,
 	struct sockaddr_in address;
 	struct ifreq *ifr;
 	struct sockaddr_in netmask;
-
 #ifdef AF_LINK
-	struct sockaddr_dl sdl;
+	struct sockaddr_dl *sdl;
 #endif
 
 	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
@@ -239,12 +240,15 @@ do_interface(const char *ifname,
 		if (strcmp(ifname, ifr->ifr_name) != 0)
 			continue;
 
+		found = 1;
+
 #ifdef AF_LINK
 		if (hwaddr && hwlen && ifr->ifr_addr.sa_family == AF_LINK) {
-			memcpy(&sdl, &ifr->ifr_addr, sizeof(sdl));
-			*hwlen = sdl.sdl_alen;
-			memcpy(hwaddr, sdl.sdl_data + sdl.sdl_nlen,
-			       (size_t)sdl.sdl_alen);
+			sdl = xmalloc(ifr->ifr_addr.sa_len);
+			memcpy(sdl, &ifr->ifr_addr, ifr->ifr_addr.sa_len);
+			*hwlen = sdl->sdl_alen;
+			memcpy(hwaddr, LLADDR(sdl), *hwlen);
+			free(sdl);
 			retval = 1;
 			break;
 		}
@@ -273,8 +277,87 @@ do_interface(const char *ifname,
 
 	}
 
+	if (!found)
+		errno = ENXIO;
 	close(s);
 	free(ifc.ifc_buf);
+	return retval;
+}
+
+int
+up_interface(const char *ifname)
+{
+	int s;
+	struct ifreq ifr;
+	int retval = -1;
+#ifdef __linux__
+	char *p;
+#endif
+
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		return -1;
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+#ifdef __linux__
+	/* We can only bring the real interface up */
+	if ((p = strchr(ifr.ifr_name, ':')))
+		*p = '\0';
+#endif
+	if (ioctl(s, SIOCGIFFLAGS, &ifr) == 0) {
+		if ((ifr.ifr_flags & IFF_UP))
+			retval = 0;
+		else {
+			ifr.ifr_flags |= IFF_UP;
+			if (ioctl(s, SIOCSIFFLAGS, &ifr) == 0)
+				retval = 0;
+		}
+	}
+	close(s);
+	return retval;
+}
+
+int
+carrier_status(const char *ifname)
+{
+	int s;
+	struct ifreq ifr;
+	int retval = -1;
+#ifdef SIOCGIFMEDIA
+	struct ifmediareq ifmr;
+#endif
+#ifdef __linux__
+	char *p;
+#endif
+
+	if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+		return -1;
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+#ifdef __linux__
+	/* We can only test the real interface up */
+	if ((p = strchr(ifr.ifr_name, ':')))
+		*p = '\0';
+#endif
+	if ((retval = ioctl(s, SIOCGIFFLAGS, &ifr)) == 0) {
+		if (ifr.ifr_flags & IFF_UP && ifr.ifr_flags & IFF_RUNNING)
+			retval = 1;
+		else
+			retval = 0;
+	}
+
+#ifdef SIOCGIFMEDIA
+	if (retval == 1) {
+		memset(&ifmr, 0, sizeof(ifmr));
+		strncpy(ifmr.ifm_name, ifr.ifr_name, sizeof(ifmr.ifm_name));
+		if (ioctl(s, SIOCGIFMEDIA, &ifmr) != -1 &&
+		    ifmr.ifm_status & IFM_AVALID)
+		{
+			if (!(ifmr.ifm_status & IFM_ACTIVE))
+				retval = 0;
+		}
+	}
+#endif
+	close(s);
 	return retval;
 }
 
@@ -287,9 +370,6 @@ read_interface(const char *ifname, _unused int metric)
 	unsigned char *hwaddr = NULL;
 	size_t hwlen = 0;
 	sa_family_t family = 0;
-#ifdef __linux__
-	char *p;
-#endif
 
 	memset(&ifr, 0, sizeof(ifr));
 	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
@@ -342,20 +422,8 @@ read_interface(const char *ifname, _unused int metric)
 			goto eexit;
 	}
 
-	/* Bring the interface up if it's down */
-	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
-#ifdef __linux__
-	/* We can only bring the real interface up */
-	if ((p = strchr(ifr.ifr_name, ':')))
-		*p = '\0';
-#endif
-	if (ioctl(s, SIOCGIFFLAGS, &ifr) == -1)
+	if (up_interface(ifname) != 0)
 		goto eexit;
-	if (!(ifr.ifr_flags & IFF_UP)) {
-		ifr.ifr_flags |= IFF_UP;
-		if (ioctl(s, SIOCSIFFLAGS, &ifr) != 0)
-			goto eexit;
-	}
 
 	iface = xzalloc(sizeof(*iface));
 	strlcpy(iface->name, ifname, IF_NAMESIZE);
@@ -367,11 +435,10 @@ read_interface(const char *ifname, _unused int metric)
 	iface->arpable = !(ifr.ifr_flags & (IFF_NOARP | IFF_LOOPBACK));
 
 	/* 0 is a valid fd, so init to -1 */
-	iface->fd = -1;
+	iface->raw_fd = -1;
 	iface->udp_fd = -1;
-#ifdef ENABLE_ARP
 	iface->arp_fd = -1;
-#endif
+	iface->link_fd = -1;
 
 eexit:
 	close(s);
@@ -419,21 +486,32 @@ open_udp_socket(struct interface *iface)
 		struct sockaddr sa;
 		struct sockaddr_in sin;
 	} su;
-	int n = 1;
+	int n;
+#ifdef SO_BINDTODEVICE
+	struct ifreq ifr;
+#endif
 
 	if ((s = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
 		return -1;
 
+	n = 1;
+	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &n, sizeof(n)) == -1)
+		goto eexit;
+#ifdef SO_BINDTODEVICE
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, iface->name, sizeof(ifr.ifr_name));
+	if (setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE, &ifr, sizeof(ifr)) == -1)
+		goto eexit;
+#endif
+	/* As we don't use this socket for receiving, set the
+	 * receive buffer to 1 */
+	n = 1;
+	if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &n, sizeof(n)) == -1)
+		goto eexit;
 	memset(&su, 0, sizeof(su));
 	su.sin.sin_family = AF_INET;
 	su.sin.sin_port = htons(DHCP_CLIENT_PORT);
 	su.sin.sin_addr.s_addr = iface->addr.s_addr;
-	if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &n, sizeof(n)) == -1)
-		goto eexit;
-	/* As we don't actually use this socket for anything, set
-	 * the receiver buffer to 1 */
-	if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &n, sizeof(n)) == -1)
-		goto eexit;
 	if (bind(s, &su.sa, sizeof(su)) == -1)
 		goto eexit;
 
@@ -596,38 +674,34 @@ valid_udp_packet(const uint8_t *data)
 	return retval;
 }
 
-#ifdef ENABLE_ARP
 int
 send_arp(const struct interface *iface, int op, in_addr_t sip, in_addr_t tip)
 {
 	struct arphdr *arp;
 	size_t arpsize;
-	unsigned char *p;
+	uint8_t *p;
 	int retval;
 
-	arpsize = sizeof(*arp) + 2 * iface->hwlen + 2 *sizeof(sip);
-
+	arpsize = sizeof(*arp) + 2 * iface->hwlen + 2 * sizeof(sip);
 	arp = xmalloc(arpsize);
 	arp->ar_hrd = htons(iface->family);
 	arp->ar_pro = htons(ETHERTYPE_IP);
 	arp->ar_hln = iface->hwlen;
 	arp->ar_pln = sizeof(sip);
 	arp->ar_op = htons(op);
-	p = (unsigned char *)arp;
+	p = (uint8_t *)arp;
 	p += sizeof(*arp);
 	memcpy(p, iface->hwaddr, iface->hwlen);
 	p += iface->hwlen;
 	memcpy(p, &sip, sizeof(sip));
 	p += sizeof(sip);
-	/* ARP requests should ignore this, but we fill with 0xff
-	 * for broadcast. */
-	memset(p, 0xff, iface->hwlen);
-	p += iface->hwlen;
+	/* ARP requests should ignore this */
+	retval = iface->hwlen;
+	while (retval--)
+		*p++ = '\0';
 	memcpy(p, &tip, sizeof(tip));
-
+	p += sizeof(tip);
 	retval = send_raw_packet(iface, ETHERTYPE_ARP, arp, arpsize);
 	free(arp);
 	return retval;
 }
-#endif
-

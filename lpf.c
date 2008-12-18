@@ -89,13 +89,10 @@ open_socket(struct interface *iface, int protocol)
 	}
 	/* Install the DHCP filter */
 	memset(&pf, 0, sizeof(pf));
-#ifdef ENABLE_ARP
 	if (protocol == ETHERTYPE_ARP) {
 		pf.filter = UNCONST(arp_bpf_filter);
 		pf.len = arp_bpf_filter_len;
-	} else
-#endif
-	{
+	} else {
 		pf.filter = UNCONST(dhcp_bpf_filter);
 		pf.len = dhcp_bpf_filter_len;
 	}
@@ -107,12 +104,10 @@ open_socket(struct interface *iface, int protocol)
 		goto eexit;
 	if (bind(s, &su.sa, sizeof(su)) == -1)
 		goto eexit;
-#ifdef ENABLE_ARP
 	if (protocol == ETHERTYPE_ARP)
 		fd = &iface->arp_fd;
 	else
-#endif
-		fd = &iface->fd;
+		fd = &iface->raw_fd;
 	if (*fd != -1)
 		close(*fd);
 	*fd = s;
@@ -148,12 +143,10 @@ send_raw_packet(const struct interface *iface, int protocol,
 		       &ipv4_bcast_addr, sizeof(ipv4_bcast_addr));
 	else
 		memset(&su.sll.sll_addr, 0xff, iface->hwlen);
-#ifdef ENABLE_ARP
 	if (protocol == ETHERTYPE_ARP)
 		fd = iface->arp_fd;
 	else
-#endif
-		fd = iface->fd;
+		fd = iface->raw_fd;
 
 	return sendto(fd, data, len, 0, &su.sa, sizeof(su));
 }
@@ -164,12 +157,10 @@ get_raw_packet(struct interface *iface, int protocol, void *data, ssize_t len)
 	ssize_t bytes;
 	int fd = -1;
 
-	if (protocol == ETHERTYPE_ARP) {
-#ifdef ENABLE_ARP
+	if (protocol == ETHERTYPE_ARP)
 		fd = iface->arp_fd;
-#endif
-	} else
-		fd = iface->fd;
+	else
+		fd = iface->raw_fd;
 	bytes = read(fd, data, len);
 	if (bytes == -1)
 		return errno == EAGAIN ? 0 : -1;

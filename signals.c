@@ -29,7 +29,6 @@
 #include <sys/socket.h>
 
 #include <errno.h>
-#include <poll.h>
 #include <signal.h>
 #include <string.h>
 #include <unistd.h>
@@ -62,31 +61,20 @@ signal_fd(void)
 	return (signal_pipe[0]);
 }
 
-/* Check if we have a signal or not */
-int
-signal_exists(int fd)
-{
-	if (fd_hasdata(fd) == 1)
-		return 0;
-	return -1;
-}
-
 /* Read a signal from the signal pipe. Returns 0 if there is
  * no signal, -1 on error (and sets errno appropriately), and
  * your signal on success */
 int
-signal_read(int fd)
+signal_read(void)
 {
 	int sig = -1;
 	char buf[16];
 	size_t bytes;
 
-	if (fd_hasdata(fd) == 1) {
-		memset(buf, 0, sizeof(buf));
-		bytes = read(signal_pipe[0], buf, sizeof(buf));
-		if (bytes >= sizeof(sig))
-			memcpy(&sig, buf, sizeof(sig));
-	}
+	memset(buf, 0, sizeof(buf));
+	bytes = read(signal_pipe[0], buf, sizeof(buf));
+	if (bytes >= sizeof(sig))
+		memcpy(&sig, buf, sizeof(sig));
 	return sig;
 }
 

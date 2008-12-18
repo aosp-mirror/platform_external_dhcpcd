@@ -16,7 +16,11 @@ BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT)
     setprop dhcp.${interface}.result "ok"
     ;;
 
-EXPIRE|FAIL|IPV4LL|RELEASE|STOP)
+EXPIRE|FAIL|IPV4LL|STOP)
     setprop dhcp.${interface}.result "failed"
+    ;;
+
+RELEASE)
+    setprop dhcp.${interface}.result "released"
     ;;
 esac

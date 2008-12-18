@@ -42,6 +42,7 @@ const char copyright[] = "Copyright (c) 2006-2008 Roy Marples";
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "config.h"
 #include "client.h"
@@ -53,70 +54,65 @@ const char copyright[] = "Copyright (c) 2006-2008 Roy Marples";
 #ifdef ANDROID
 #include <linux/capability.h>
 #include <linux/prctl.h>
+#include <cutils/properties.h>
 #include <private/android_filesystem_config.h>
 #endif
 
 /* Don't set any optional arguments here so we retain POSIX
  * compatibility with getopt */
-#define OPTS "c:df:h:i:kl:m:no:pqr:s:t:u:v:xAC:DEF:GI:LO:TVX"
+#define OPTS "bc:df:h:i:kl:m:no:pqr:s:t:u:v:xABC:DEF:GI:KLO:Q:TVX:"
 
 static int doversion = 0;
 static int dohelp = 0;
 static const struct option longopts[] = {
-	{"script",      required_argument,  NULL, 'c'},
-	{"debug",       no_argument,        NULL, 'd'},
-	{"config",	required_argument,  NULL, 'f'},
-	{"hostname",    optional_argument,  NULL, 'h'},
-	{"classid",     optional_argument,  NULL, 'i'},
-	{"release",     no_argument,        NULL, 'k'},
-	{"leasetime",   required_argument,  NULL, 'l'},
-	{"metric",      required_argument,  NULL, 'm'},
-	{"renew",       no_argument,        NULL, 'n'},
-	{"option",      required_argument,  NULL, 'o'},
-	{"persistent",  no_argument,        NULL, 'p'},
-	{"quiet",       no_argument,        NULL, 'q'},
-	{"inform",      optional_argument,  NULL, 's'},
-	{"request",     optional_argument,  NULL, 'r'},
-	{"timeout",     required_argument,  NULL, 't'},
-	{"userclass",   required_argument,  NULL, 'u'},
-	{"vendor",      required_argument,  NULL, 'v'},
-	{"exit",        no_argument,        NULL, 'x'},
-	{"noarp",       no_argument,        NULL, 'A'},
-	{"nohook",	required_argument,  NULL, 'C'},
-	{"duid",        no_argument,        NULL, 'D'},
-	{"lastlease",   no_argument,        NULL, 'E'},
-	{"fqdn",        optional_argument,  NULL, 'F'},
-	{"nogateway",   no_argument,        NULL, 'G'},
-	{"clientid",    optional_argument,  NULL, 'I'},
-	{"noipv4ll",    no_argument,        NULL, 'L'},
-	{"nooption",    optional_argument,  NULL, 'O'},
-	{"test",        no_argument,        NULL, 'T'},
-	{"variables",   no_argument,        NULL, 'V'},
-	{"nodaemonise", no_argument,        NULL, 'X'},
-	{"help",        no_argument,        &dohelp, 1},
-	{"version",     no_argument,        &doversion, 1},
-#ifdef THERE_IS_NO_FORK
-	{"daemonised",	no_argument,        NULL, 'z'},
-	{"skiproutes",  required_argument,  NULL, 'Z'},
-#endif
+	{"background",    no_argument,        NULL, 'b'},
+	{"script",        required_argument,  NULL, 'c'},
+	{"debug",         no_argument,        NULL, 'd'},
+	{"config",        required_argument,  NULL, 'f'},
+	{"hostname",      optional_argument,  NULL, 'h'},
+	{"vendorclassid", optional_argument,  NULL, 'i'},
+	{"release",       no_argument,        NULL, 'k'},
+	{"leasetime",     required_argument,  NULL, 'l'},
+	{"metric",        required_argument,  NULL, 'm'},
+	{"rebind",        no_argument,        NULL, 'n'},
+	{"option",        required_argument,  NULL, 'o'},
+	{"persistent",    no_argument,        NULL, 'p'},
+	{"quiet",         no_argument,        NULL, 'q'},
+	{"request",       optional_argument,  NULL, 'r'},
+	{"inform",        optional_argument,  NULL, 's'},
+	{"timeout",       required_argument,  NULL, 't'},
+	{"userclass",     required_argument,  NULL, 'u'},
+	{"vendor",        required_argument,  NULL, 'v'},
+	{"exit",          no_argument,        NULL, 'x'},
+	{"noarp",         no_argument,        NULL, 'A'},
+	{"nobackground",  no_argument,        NULL, 'B'},
+	{"nohook",	  required_argument,  NULL, 'C'},
+	{"duid",          no_argument,        NULL, 'D'},
+	{"lastlease",     no_argument,        NULL, 'E'},
+	{"fqdn",          optional_argument,  NULL, 'F'},
+	{"nogateway",     no_argument,        NULL, 'G'},
+	{"clientid",      optional_argument,  NULL, 'I'},
+	{"nolink",        no_argument,        NULL, 'K'},
+	{"noipv4ll",      no_argument,        NULL, 'L'},
+	{"nooption",      optional_argument,  NULL, 'O'},
+	{"require",       required_argument,  NULL, 'Q'},
+	{"test",          no_argument,        NULL, 'T'},
+	{"variables",     no_argument,        NULL, 'V'},
+	{"blacklist",     required_argument,  NULL, 'X'},
+	{"help",          no_argument,        &dohelp, 1},
+	{"version",       no_argument,        &doversion, 1},
 #ifdef CMDLINE_COMPAT
-	{"nohostname",  no_argument,        NULL, 'H'},
-	{"nomtu",       no_argument,        NULL, 'M'},
-	{"nontp",       no_argument,        NULL, 'N'},
-	{"nodns",       no_argument,        NULL, 'R'},
-	{"msscr",       no_argument,        NULL, 'S'},
-	{"nonis",       no_argument,        NULL, 'Y'},
+	{"classid",       optional_argument,  NULL, 'i'},
+	{"renew",         no_argument,        NULL, 'n'},
+	{"nohostname",    no_argument,        NULL, 'H'},
+	{"nomtu",         no_argument,        NULL, 'M'},
+	{"nontp",         no_argument,        NULL, 'N'},
+	{"nodns",         no_argument,        NULL, 'R'},
+	{"msscr",         no_argument,        NULL, 'S'},
+	{"nonis",         no_argument,        NULL, 'Y'},
 #endif
 	{NULL,          0,                  NULL, '\0'}
 };
-
-#ifdef THERE_IS_NO_FORK
-char dhcpcd[PATH_MAX];
-char **dhcpcd_argv = NULL;
-int dhcpcd_argc = 0;
-char *dhcpcd_skiproutes = NULL;
-#define EXTRA_OPTS "zZ:"
-#endif
 
 #ifdef CMDLINE_COMPAT
 # define EXTRA_OPTS "HMNRSY"
@@ -164,12 +160,10 @@ read_pid(const char *pidfile)
 static void
 usage(void)
 {
-#ifndef MINIMAL
 	printf("usage: "PACKAGE" [-dknpqxADEGHKLOTV] [-c script] [-f file ] [-h hostname]\n"
 	       "              [-i classID ] [-l leasetime] [-m metric] [-o option] [-r ipaddr]\n"
 	       "              [-s ipaddr] [-t timeout] [-u userclass] [-F none|ptr|both]\n"
-	       "              [-I clientID] [-C hookscript] <interface>\n");
-#endif
+	       "              [-I clientID] [-C hookscript] [-Q option] [-X ipaddr] <interface>\n");
 }
 
 static char * 
@@ -214,7 +208,6 @@ add_environ(struct options *options, const char *value, int uniq)
 	return newlist[i];
 }
 
-#ifndef MINIMAL
 #define parse_string(buf, len, arg) parse_string_hwaddr(buf, len, arg, 0)
 static ssize_t
 parse_string_hwaddr(char *sbuf, ssize_t slen, char *str, int clid)
@@ -312,7 +305,6 @@ parse_string_hwaddr(char *sbuf, ssize_t slen, char *str, int clid)
 	}
 	return l;
 }
-#endif
 
 static int
 parse_option(int opt, char *oarg, struct options *options)
@@ -320,44 +312,44 @@ parse_option(int opt, char *oarg, struct options *options)
 	int i;
 	char *p;
 	ssize_t s;
-#ifndef MINIMAL
 	struct in_addr addr;
-#endif
 
 	switch(opt) {
+	case 'b':
+		options->options |= DHCPCD_BACKGROUND;
+		break;
 	case 'c':
 		strlcpy(options->script, oarg, sizeof(options->script));
 		break;
 	case 'h':
-#ifndef MINIMAL
 		if (oarg)
 			s = parse_string(options->hostname + 1,
-					 MAXHOSTNAMELEN, oarg);
+					 HOSTNAME_MAX_LEN, oarg);
 		else
 			s = 0;
 		if (s == -1) {
 			logger(LOG_ERR, "hostname: %s", strerror(errno));
 			return -1;
 		}
+		if (s != 0 && options->hostname[1] == '.') {
+			logger(LOG_ERR, "hostname cannot begin with a .");
+			return -1;
+		}
 		options->hostname[0] = (uint8_t)s;
-#endif
 		break;
 	case 'i':
-#ifndef MINIMAL
 		if (oarg)
-			s = parse_string((char *)options->classid + 1,
-					 CLASSID_MAX_LEN, oarg);
+			s = parse_string((char *)options->vendorclassid + 1,
+					 VENDORCLASSID_MAX_LEN, oarg);
 		else
 			s = 0;
 		if (s == -1) {
-			logger(LOG_ERR, "classid: %s", strerror(errno));
+			logger(LOG_ERR, "vendorclassid: %s", strerror(errno));
 			return -1;
 		}
-		*options->classid = (uint8_t)s;
-#endif
+		*options->vendorclassid = (uint8_t)s;
 		break;
 	case 'l':
-#ifndef MINIMAL
 		if (*oarg == '-') {
 			logger(LOG_ERR,
 			       "leasetime must be a positive value");
@@ -369,7 +361,6 @@ parse_option(int opt, char *oarg, struct options *options)
 			logger(LOG_ERR, "`%s' out of range", oarg);
 			return -1;
 		}
-#endif
 		break;
 	case 'm':
 		options->metric = atoint(oarg);
@@ -379,7 +370,7 @@ parse_option(int opt, char *oarg, struct options *options)
 		}
 		break;
 	case 'o':
-		if (make_reqmask(options->reqmask, &oarg, 1) != 0) {
+		if (make_option_mask(options->requestmask, &oarg, 1) != 0) {
 			logger(LOG_ERR, "unknown option `%s'", oarg);
 			return -1;
 		}
@@ -416,7 +407,7 @@ parse_option(int opt, char *oarg, struct options *options)
 	case 'r':
 		if (!(options->options & DHCPCD_INFORM))
 			options->options |= DHCPCD_REQUEST;
-		if (*oarg && !inet_aton(oarg, &options->request_address)) {
+		if (oarg && !inet_aton(oarg, &options->request_address)) {
 			logger(LOG_ERR, "`%s' is not a valid IP address",
 			       oarg);
 			return -1;
@@ -430,7 +421,6 @@ parse_option(int opt, char *oarg, struct options *options)
 		}
 		break;
 	case 'u':
-#ifndef MINIMAL
 		s = USERCLASS_MAX_LEN - options->userclass[0] - 1;
 		s = parse_string((char *)options->userclass + options->userclass[0] + 2,
 				 s, oarg);
@@ -442,10 +432,8 @@ parse_option(int opt, char *oarg, struct options *options)
 			options->userclass[options->userclass[0] + 1] = s;
 			options->userclass[0] += s + 1;
 		}
-#endif
 		break;
 	case 'v':
-#ifndef MINIMAL
 		p = strchr(oarg, ',');
 		if (!p || !p[1]) {
 			logger(LOG_ERR, "invalid vendor format");
@@ -480,12 +468,14 @@ parse_option(int opt, char *oarg, struct options *options)
 			options->vendor[options->vendor[0] + 2] = s;
 			options->vendor[0] += s + 2;
 		}
-#endif
 		break;
 	case 'A':
 		options->options &= ~DHCPCD_ARP;
 		/* IPv4LL requires ARP */
 		options->options &= ~DHCPCD_IPV4LL;
+		break;
+	case 'B':
+		options->options &= ~DHCPCD_DAEMONISE;
 		break;
 	case 'C':
 		/* Commas to spaces for shell */
@@ -504,7 +494,6 @@ parse_option(int opt, char *oarg, struct options *options)
 		options->options |= DHCPCD_LASTLEASE;
 		break;
 	case 'F':
-#ifndef MINIMAL
 		if (!oarg) {
 			options->fqdn = FQDN_BOTH;
 			break;
@@ -515,20 +504,20 @@ parse_option(int opt, char *oarg, struct options *options)
 			options->fqdn = FQDN_PTR;
 		else if (strcmp(oarg, "both") == 0)
 			options->fqdn = FQDN_BOTH;
+		else if (strcmp(oarg, "disable") == 0)
+			options->fqdn = FQDN_DISABLE;
 		else {
 			logger(LOG_ERR, "invalid value `%s' for FQDN",
 			       oarg);
 			return -1;
 		}
-#endif
 		break;
 	case 'G':
 		options->options &= ~DHCPCD_GATEWAY;
 		break;
 	case 'I':
-#ifndef MINIMAL
 		/* Strings have a type of 0 */;
-		options->classid[1] = 0;
+		options->clientid[1] = 0;
 		if (oarg)
 			s = parse_string_hwaddr((char *)options->clientid + 1,
 						CLIENTID_MAX_LEN, oarg, 1);
@@ -543,21 +532,40 @@ parse_option(int opt, char *oarg, struct options *options)
 			options->options &= ~DHCPCD_DUID;
 			options->options &= ~DHCPCD_CLIENTID;
 		}
-#endif
+		break;
+	case 'K':
+		options->options &= ~DHCPCD_LINK;
 		break;
 	case 'L':
 		options->options &= ~DHCPCD_IPV4LL;
 		break;
 	case 'O':
-		if (make_reqmask(options->reqmask, &optarg, -1) != 0 ||
-		    make_reqmask(options->nomask, &optarg, 1) != 0)
+		if (make_option_mask(options->requestmask, &oarg, -1) != 0 ||
+		    make_option_mask(options->requiremask, &oarg, -1) != 0 ||
+		    make_option_mask(options->nomask, &oarg, 1) != 0)
 		{
-			logger(LOG_ERR, "unknown option `%s'", optarg);
+			logger(LOG_ERR, "unknown option `%s'", oarg);
+			return -1;
+		}
+		break;
+	case 'Q':
+		if (make_option_mask(options->requiremask, &oarg, 1) != 0 ||
+		    make_option_mask(options->requestmask, &oarg, 1) != 0)
+		{
+			logger(LOG_ERR, "unknown option `%s'", oarg);
 			return -1;
 		}
 		break;
 	case 'X':
-		options->options &= ~DHCPCD_DAEMONISE;
+		if (!inet_aton(oarg, &addr)) {
+			logger(LOG_ERR, "`%s' is not a valid IP address",
+			       oarg);
+			return -1;
+		}
+		options->blacklist = xrealloc(options->blacklist,
+		    sizeof(in_addr_t) * (options->blacklist_len + 1));
+		options->blacklist[options->blacklist_len] = addr.s_addr;
+		options->blacklist_len++;
 		break;
 	default:
 		return 0;
@@ -630,38 +638,34 @@ main(int argc, char **argv)
 	FILE *f;
 	char *cf = NULL;
 	char *intf = NULL;
+	struct timespec ts;
 
 #ifdef ANDROID
 	switchUser();
 #endif
-
 	closefrom(3);
+	/* Saves calling fflush(stream) in the logger */
+	setlinebuf(stdout);
 	openlog(PACKAGE, LOG_PID, LOG_LOCAL0);
+	setlogprefix(PACKAGE ": ");
 
 	options = xzalloc(sizeof(*options));
-	options->options |= DHCPCD_GATEWAY | DHCPCD_DAEMONISE;
+	options->options |= DHCPCD_CLIENTID | DHCPCD_GATEWAY | DHCPCD_DAEMONISE;
+	options->options |= DHCPCD_ARP | DHCPCD_IPV4LL | DHCPCD_LINK;
 	options->timeout = DEFAULT_TIMEOUT;
 	strlcpy(options->script, SCRIPT, sizeof(options->script));
 
-#ifndef MINIMAL
-	options->options |= DHCPCD_CLIENTID;
-	options->classid[0] = snprintf((char *)options->classid + 1, CLASSID_MAX_LEN,
-				       "%s %s", PACKAGE, VERSION);
-#endif
-#ifdef ENABLE_ARP
-	options->options |= DHCPCD_ARP;
- #ifdef ENABLE_IPV4LL
-	options->options |= DHCPCD_IPV4LL;
- #endif
-#endif
+	options->vendorclassid[0] = snprintf((char *)options->vendorclassid + 1,
+					     VENDORCLASSID_MAX_LEN,
+					     "%s %s", PACKAGE, VERSION);
 
 #ifdef CMDLINE_COMPAT
-	add_reqmask(options->reqmask, DHCP_DNSSERVER);
-	add_reqmask(options->reqmask, DHCP_DNSDOMAIN);
-	add_reqmask(options->reqmask, DHCP_DNSSEARCH);
-	add_reqmask(options->reqmask, DHCP_NISSERVER);
-	add_reqmask(options->reqmask, DHCP_NISDOMAIN);
-	add_reqmask(options->reqmask, DHCP_NTPSERVER);
+	add_option_mask(options->requestmask, DHO_DNSSERVER);
+	add_option_mask(options->requestmask, DHO_DNSDOMAIN);
+	add_option_mask(options->requestmask, DHO_DNSSEARCH);
+	add_option_mask(options->requestmask, DHO_NISSERVER);
+	add_option_mask(options->requestmask, DHO_NISDOMAIN);
+	add_option_mask(options->requestmask, DHO_NTPSERVER);
 
 	/* If the duid file exists, then enable duid by default
 	 * This means we don't break existing clients that easily :) */
@@ -671,23 +675,11 @@ main(int argc, char **argv)
 	}
 #endif
 
-#ifdef THERE_IS_NO_FORK
-	dhcpcd_argv = argv;
-	dhcpcd_argc = argc;
-	if (!realpath(argv[0], dhcpcd)) {
-		fprintf(stderr, "unable to resolve the path `%s': %s",
-			argv[0], strerror(errno));
-		goto abort;
-	}
-#endif
-
-#ifndef MINIMAL
 	gethostname(options->hostname + 1, sizeof(options->hostname));
 	if (strcmp(options->hostname + 1, "(none)") == 0 ||
 	    strcmp(options->hostname + 1, "localhost") == 0)
 		options->hostname[1] = '\0';
 	*options->hostname = strlen(options->hostname + 1);
-#endif
 
 	while ((opt = getopt_long(argc, argv, OPTS EXTRA_OPTS,
 				  longopts, &option_index)) != -1)
@@ -711,23 +703,8 @@ main(int argc, char **argv)
 		}
 	}
 
-	if (doversion) {
+	if (doversion)
 		printf(""PACKAGE" "VERSION"\n%s\n", copyright);
-		printf("Compile time options:"
-#ifdef ENABLE_ARP
-		       " ARP"
-#endif
-#ifdef ENABLE_IPV4LL
-		       " IPV4LL"
-#endif
-#ifdef MINIMAL
-		       " MINIMAL"
-#endif
-#ifdef THERE_IS_NO_FORK
-		       " THERE_IS_NO_FORK"
-#endif
-		       "\n");
-	}
 
 	if (dohelp)
 		usage();
@@ -822,15 +799,6 @@ main(int argc, char **argv)
 			break;
 		case 'f':
 			break;
-#ifdef THERE_IS_NO_FORK
-		case 'z':
-			options->options |= DHCPCD_DAEMONISED;
-			close_fds();
-			break;
-		case 'Z':
-			dhcpcd_skiproutes = xstrdup(optarg);
-			break;
-#endif
 		case 'k':
 			sig = SIGHUP;
 			break;
@@ -846,22 +814,22 @@ main(int argc, char **argv)
 #ifdef CMDLINE_COMPAT
 		case 'H': /* FALLTHROUGH */
 		case 'M':
-			del_reqmask(options->reqmask, DHCP_MTU);
+			del_option_mask(options->requestmask, DHO_MTU);
 			break;
 		case 'N':
-			del_reqmask(options->reqmask, DHCP_NTPSERVER);
+			del_option_mask(options->requestmask, DHO_NTPSERVER);
 			break;
 		case 'R':
-			del_reqmask(options->reqmask, DHCP_DNSSERVER);
-			del_reqmask(options->reqmask, DHCP_DNSDOMAIN);
-			del_reqmask(options->reqmask, DHCP_DNSSEARCH);
+			del_option_mask(options->requestmask, DHO_DNSSERVER);
+			del_option_mask(options->requestmask, DHO_DNSDOMAIN);
+			del_option_mask(options->requestmask, DHO_DNSSEARCH);
 			break;
 		case 'S':
-			add_reqmask(options->reqmask, DHCP_MSCSR);
+			add_option_mask(options->requestmask, DHO_MSCSR);
 			break;
 		case 'Y':
-			del_reqmask(options->reqmask, DHCP_NISSERVER);
-			del_reqmask(options->reqmask, DHCP_NISDOMAIN);
+			del_option_mask(options->requestmask, DHO_NISSERVER);
+			del_option_mask(options->requestmask, DHO_NISDOMAIN);
 			break;
 #endif
 		default:
@@ -874,59 +842,16 @@ main(int argc, char **argv)
 		}
 	}
 
-#ifndef MINIMAL
-	if ((p = strchr(options->hostname, '.'))) {
-		if (options->fqdn == FQDN_DISABLE)
-			*p = '\0';
-	} else {
-		if (options->fqdn != FQDN_DISABLE) {
-			logger(LOG_WARNING, "hostname `%s' is not a FQDN",
-			       options->hostname);
-			options->fqdn = FQDN_DISABLE;
-		}
-	}
-	if (options->fqdn != FQDN_DISABLE)
-		del_reqmask(options->reqmask, DHCP_HOSTNAME);
+#ifdef THERE_IS_NO_FORK
+	options->options &= ~DHCPCD_DAEMONISE;
 #endif
 
-	if (options->request_address.s_addr == 0 &&
-	    (options->options & DHCPCD_INFORM ||
-	     options->options & DHCPCD_REQUEST))
-	{
-		if (get_address(options->interface,
-				&options->request_address,
-				&options->request_netmask) != 1)
-		{
-			logger(LOG_ERR, "no existing address");
-			goto abort;
-		}
-	}
-
-	if (!(options->options & DHCPCD_DAEMONISE))
-		options->timeout = 0;
-
-	if (IN_LINKLOCAL(ntohl(options->request_address.s_addr))) {
-		logger(LOG_ERR,
-		       "you are not allowed to request a link local address");
-		goto abort;
-	}
-
-/* android runs us as user "dhcp" */
 #ifndef ANDROID
+        /* android runs us as user "dhcp" */
 	if (geteuid())
 		logger(LOG_WARNING, PACKAGE " will not work correctly unless"
 		       " run as root");
 #endif
-
-	prefix = xmalloc(sizeof(char) * (IF_NAMESIZE + 3));
-	snprintf(prefix, IF_NAMESIZE, "%s: ", options->interface);
-	setlogprefix(prefix);
-	snprintf(options->pidfile, sizeof(options->pidfile), PIDFILE,
-		 options->interface);
-	free(prefix);
-
-	chdir("/");
-	umask(022);
 
 	if (options->options & DHCPCD_TEST) {
 		if (options->options & DHCPCD_REQUEST ||
@@ -948,32 +873,100 @@ main(int argc, char **argv)
 		}
 	}
 
+	prefix = xmalloc(sizeof(char) * (IF_NAMESIZE + 3));
+	snprintf(prefix, IF_NAMESIZE, "%s: ", options->interface);
+	setlogprefix(prefix);
+	snprintf(options->pidfile, sizeof(options->pidfile), PIDFILE,
+		 options->interface);
+	free(prefix);
+
+	if (options->request_address.s_addr == 0 &&
+	    (options->options & DHCPCD_INFORM ||
+	     options->options & DHCPCD_REQUEST))
+	{
+		errno = 0;
+		if (get_address(options->interface,
+				&options->request_address,
+				&options->request_netmask) != 1)
+		{
+			if (errno)
+				logger(LOG_ERR, "get_address: %s",
+				       strerror(errno));
+			else
+				logger(LOG_ERR, "no existing address");
+			goto abort;
+		}
+	}
+	if (IN_LINKLOCAL(ntohl(options->request_address.s_addr))) {
+		logger(LOG_ERR,
+		       "you are not allowed to request a link local address");
+		goto abort;
+	}
+
+	chdir("/");
+	umask(022);
+
 	if (sig != 0 && !(options->options & DHCPCD_DAEMONISED)) {
+#ifdef ANDROID
+                char pidpropname[PROPERTY_KEY_MAX];
+                char pidpropval[PROPERTY_VALUE_MAX];
+
+		i = -1;
+                if (snprintf(pidpropname,
+                             sizeof(pidpropname),
+                             "dhcp.%s.pid", options->interface) >= PROPERTY_KEY_MAX) {
+                    goto abort;
+                }
+                property_get(pidpropname, pidpropval, NULL);
+                if (strlen(pidpropval) == 0) {
+                    goto abort;
+                }
+                pid = atoi(pidpropval);
+#else
 		i = -1;
 		pid = read_pid(options->pidfile);
+#endif
 		if (pid != 0)
 			logger(LOG_INFO, "sending signal %d to pid %d",
 			       sig, pid);
 
-		if (!pid || (i = kill(pid, sig)))
-			logger(sig == SIGALRM ? LOG_INFO : LOG_ERR,
-			       ""PACKAGE" not running");
-
-		if (pid != 0 && (sig != SIGALRM || i != 0))
+		if (!pid || (i = kill(pid, sig))) {
+			if (sig != SIGALRM)
+				logger(LOG_ERR, ""PACKAGE" not running");
 			unlink(options->pidfile);
-
+		}
 		if (i == 0) {
-			retval = EXIT_SUCCESS;
+			if (sig == SIGALRM) {
+				retval = EXIT_SUCCESS;
+				goto abort;
+			}
+			/* Spin until it exits */
+			logger(LOG_INFO, "waiting for pid %d to exit", pid);
+			ts.tv_sec = 0;
+			ts.tv_nsec = 100000000; /* 10th of a second */
+			for(i = 0; i < 100; i++) {
+				nanosleep(&ts, NULL);
+				if (read_pid(options->pidfile) == 0) {
+					retval = EXIT_SUCCESS;
+					break;
+				}
+			}
+			if (retval != EXIT_SUCCESS)
+				logger(LOG_ERR, "pid %d failed to exit", pid);
 			goto abort;
 		}
-
 		if (sig != SIGALRM)
 			goto abort;	
 	}
-#ifndef ANDROID
+
 	if (!(options->options & DHCPCD_TEST) &&
 	    !(options->options & DHCPCD_DAEMONISED))
 	{
+#ifdef ANDROID
+                char pidpropname[PROPERTY_KEY_MAX];
+                char pidpropval[PROPERTY_VALUE_MAX];
+#endif
+#ifndef ANDROID
 		if ((pid = read_pid(options->pidfile)) > 0 &&
 		    kill(pid, 0) == 0)
 		{
@@ -982,7 +975,7 @@ main(int argc, char **argv)
 			       pid, options->pidfile);
 			goto abort;
 		}
-
+#endif
 		pid_fd = open(options->pidfile,
 			     O_WRONLY | O_CREAT | O_NONBLOCK, 0664);
 		if (pid_fd == -1) {
@@ -1001,17 +994,27 @@ main(int argc, char **argv)
 
 		if (set_cloexec(pid_fd) == -1)
 			goto abort;
+#ifdef ANDROID
+                if (snprintf(pidpropname,
+                             sizeof(pidpropname),
+                             "dhcp.%s.pid", options->interface) >= PROPERTY_KEY_MAX) {
+                    goto abort;
+                }
+                if (snprintf(pidpropval, sizeof(pidpropval), "%d", getpid()) >= PROPERTY_VALUE_MAX) {
+                    goto abort;
+                }
+		property_set(pidpropname, pidpropval);
+#else
 		writepid(pid_fd, getpid());
+#endif
 		logger(LOG_INFO, PACKAGE " " VERSION " starting");
 	}
-#endif /* ANDROID */
-#ifndef MINIMAL
+
 	/* Terminate the encapsulated options */
 	if (options->vendor[0]) {
 		options->vendor[0]++;
-		options->vendor[options->vendor[0]] = DHCP_END;
+		options->vendor[options->vendor[0]] = DHO_END;
 	}
-#endif
 
 	if (dhcp_run(options, &pid_fd) == 0)
 		retval = EXIT_SUCCESS;
@@ -1028,14 +1031,8 @@ abort:
 			free(options->environ[len++]);
 		free(options->environ);
 	}
+	free(options->blacklist);
 	free(options);
-
-#ifdef THERE_IS_NO_FORK
-	/* There may have been an error before the dhcp_run function
-	 * clears this, so just do it here to be safe */
-	free(dhcpcd_skiproutes);
-#endif
-
 	exit(retval);
 	/* NOTREACHED */
 }

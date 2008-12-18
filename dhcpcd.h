@@ -41,17 +41,11 @@
 #define DEFAULT_TIMEOUT		30
 #define DEFAULT_LEASETIME	3600	/* 1 hour */
 
-#define CLASSID_MAX_LEN		48
+#define HOSTNAME_MAX_LEN	250	/* 255 - 3 (FQDN) - 2 (DNS enc) */
+#define VENDORCLASSID_MAX_LEN	48
 #define CLIENTID_MAX_LEN	48
 #define USERCLASS_MAX_LEN	255
 #define VENDOR_MAX_LEN		255
-
-#ifdef THERE_IS_NO_FORK 
-extern char dhcpcd[PATH_MAX];
-extern char **dhcpcd_argv;
-extern int dhcpcd_argc;
-extern char *dhcpcd_skiproutes;
-#endif
 
 #define DHCPCD_ARP		(1 << 0)
 #define DHCPCD_DOMAIN		(1 << 2)
@@ -68,11 +62,14 @@ extern char *dhcpcd_skiproutes;
 #define DHCPCD_FORKED		(1 << 17)
 #define DHCPCD_HOSTNAME		(1 << 18)
 #define DHCPCD_CLIENTID		(1 << 19)
+#define DHCPCD_LINK		(1 << 20)
+#define DHCPCD_BACKGROUND	(1 << 21)
 
 struct options {
 	char interface[IF_NAMESIZE];
 	int metric;
-	uint8_t reqmask[256 / 8];
+	uint8_t requestmask[256 / 8];
+	uint8_t requiremask[256 / 8];
 	uint8_t nomask[256 / 8];
 	uint32_t leasetime;
 	time_t timeout;
@@ -85,14 +82,14 @@ struct options {
 	char script[PATH_MAX];
 	char pidfile[PATH_MAX];
 
-#ifndef MINIMAL
-	char hostname[MAXHOSTNAMELEN];
+	char hostname[HOSTNAME_MAX_LEN + 1];
 	int fqdn;
-	uint8_t classid[CLASSID_MAX_LEN + 1];
+	uint8_t vendorclassid[VENDORCLASSID_MAX_LEN + 1];
 	char clientid[CLIENTID_MAX_LEN + 1];
 	uint8_t userclass[USERCLASS_MAX_LEN + 1];
 	uint8_t vendor[VENDOR_MAX_LEN + 1];
-#endif
-};
 
+	size_t blacklist_len;
+	in_addr_t *blacklist;
+};
 #endif
