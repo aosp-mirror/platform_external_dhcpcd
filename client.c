@@ -470,7 +470,7 @@ client_setup(struct if_state *state, const struct options *options)
 	state->nakoff = 1;
 	state->options = options->options;
 	timerclear(&tv);
-
+    logger(LOG_ERR, "================ client_setup ================");
 	if (options->request_address.s_addr == 0 &&
 	    (options->options & DHCPCD_INFORM ||
 	     options->options & DHCPCD_REQUEST ||
