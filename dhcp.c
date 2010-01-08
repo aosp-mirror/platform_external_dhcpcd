@@ -52,6 +52,8 @@
 
 #define IPV4R	IPV4 | REQUEST
 
+#define DAD	"Duplicate address detected"
+
 /* Our aggregate option buffer.
  * We ONLY use this when options are split, which for most purposes is
  * practically never. See RFC3396 for details. */
@@ -65,8 +67,13 @@ struct dhcp_opt {
 
 static const struct dhcp_opt const dhcp_opts[] = {
 	{ 1,	IPV4 | REQUEST,	"subnet_mask" },
-	{ 2,	UINT32,		"time_offset" },
+	/* RFC 3442 states that the CSR has to come before all other routes.
+	 * For completeness, we also specify static routes, then routers. */
+	{ 121,  RFC3442 | REQUEST,	"classless_static_routes" },
+	{ 249,  RFC3442,	"ms_classless_static_routes" },
+	{ 33,	IPV4 | ARRAY | REQUEST,	"static_routes" },
 	{ 3,	IPV4 | ARRAY | REQUEST,	"routers" },
+	{ 2,	UINT32,		"time_offset" },
 	{ 4,	IPV4 | ARRAY,	"time_servers" },
 	{ 5,	IPV4 | ARRAY,	"ien116_name_servers" },
 	{ 6,	IPV4 | ARRAY,	"domain_name_servers" },
@@ -96,7 +103,6 @@ static const struct dhcp_opt const dhcp_opts[] = {
 	{ 30,	UINT8,		"mask_supplier" },
 	{ 31,	UINT8,		"router_discovery" },
 	{ 32,	IPV4,		"router_solicitation_address" },
-	{ 33,	IPV4 | ARRAY | REQUEST,	"static_routes" },
 	{ 34,	UINT8,		"trailer_encapsulation" },
 	{ 35, 	UINT32,		"arp_cache_timeout" },
 	{ 36,	UINT16,		"ieee802_3_encapsulation" },
@@ -151,8 +157,6 @@ static const struct dhcp_opt const dhcp_opts[] = {
 	{ 114,	STRING,		"default_url" },
 	{ 118,	IPV4,		"subnet_selection" },
 	{ 119,	STRING | RFC3397,	"domain_search" },
-	{ 121,  RFC3442 | REQUEST,	"classless_static_routes" },
-	{ 249,  RFC3442,	"ms_classless_static_routes" },
 	{ 0, 0, NULL }
 };
 
@@ -323,25 +327,27 @@ exit:
 }
 
 int
-get_option_addr(uint32_t *a, const struct dhcp_message *dhcp, uint8_t option)
+get_option_addr(struct in_addr *a, const struct dhcp_message *dhcp,
+    uint8_t option)
 {
 	const uint8_t *p = get_option_raw(dhcp, option);
 
 	if (!p)
 		return -1;
-	memcpy(a, p, sizeof(*a));
+	memcpy(&a->s_addr, p, sizeof(a->s_addr));
 	return 0;
 }
 
 int
 get_option_uint32(uint32_t *i, const struct dhcp_message *dhcp, uint8_t option)
 {
-	uint32_t a;
+	const uint8_t *p = get_option_raw(dhcp, option);
+	uint32_t d;
 
-	if (get_option_addr(&a, dhcp, option) == -1)
+	if (!p)
 		return -1;
-
-	*i = ntohl(a);
+	memcpy(&d, p, sizeof(d));
+	*i = ntohl(d);
 	return 0;
 }
 
@@ -715,34 +721,39 @@ get_option_routes(const struct dhcp_message *dhcp)
 }
 
 static size_t
-encode_rfc1035(const char *src, uint8_t *dst, size_t len)
+encode_rfc1035(const char *src, uint8_t *dst)
 {
-	const char *c = src;
 	uint8_t *p = dst;
 	uint8_t *lp = p++;
 
-	if (len == 0)
+	if (*src == '\0')
 		return 0;
-	while (c < src + len) {
-		if (*c == '\0')
+	for (; *src; src++) {
+		if (*src == '\0')
 			break;
-		if (*c == '.') {
+		if (*src == '.') {
 			/* Skip the trailing . */
-			if (c == src + len - 1)
+			if (src[1] == '\0')
 				break;
 			*lp = p - lp - 1;
 			if (*lp == '\0')
 				return p - dst;
 			lp = p++;
 		} else
-			*p++ = (uint8_t) *c;
-		c++;
+			*p++ = (uint8_t)*src;
 	}
 	*lp = p - lp - 1;
 	*p++ = '\0';
 	return p - dst;
 }
 
+#define PUTADDR(_type, _val) \
+{ \
+	*p++ = _type; \
+	*p++ = 4; \
+	memcpy(p, &_val.s_addr, 4); \
+	p += 4; \
+}
 ssize_t
 make_message(struct dhcp_message **message,
 	     const struct interface *iface, const struct dhcp_lease *lease,
@@ -755,6 +766,8 @@ make_message(struct dhcp_message **message,
 	uint32_t ul;
 	uint16_t sz;
 	const struct dhcp_opt *opt;
+	size_t len;
+	const char *hp;
 
 	dhcp = xzalloc(sizeof (*dhcp));
 	m = (uint8_t *)dhcp;
@@ -786,15 +799,18 @@ make_message(struct dhcp_message **message,
 	case ARPHRD_IEEE1394:
 	case ARPHRD_INFINIBAND:
 		dhcp->hwlen = 0;
-		if (dhcp->ciaddr == 0)
+		if (dhcp->ciaddr == 0 &&
+		    type != DHCP_DECLINE && type != DHCP_RELEASE)
 			dhcp->flags = htons(BROADCAST_FLAG);
 		break;
 	}
 
-	if (up < 0 || up > (time_t)UINT16_MAX)
-		dhcp->secs = htons((uint16_t)UINT16_MAX);
-	else
-		dhcp->secs = htons(up);
+	if (type != DHCP_DECLINE && type != DHCP_RELEASE) {
+		if (up < 0 || up > (time_t)UINT16_MAX)
+			dhcp->secs = htons((uint16_t)UINT16_MAX);
+		else
+			dhcp->secs = htons(up);
+	}
 	dhcp->xid = xid;
 	dhcp->cookie = htonl(MAGIC_COOKIE);
 
@@ -802,7 +818,41 @@ make_message(struct dhcp_message **message,
 	*p++ = 1;
 	*p++ = type;
 
-	if (type == DHCP_REQUEST) {
+	if (iface->clientid) {
+		*p++ = DHO_CLIENTID;
+		memcpy(p, iface->clientid, iface->clientid[0] + 1);
+		p += iface->clientid[0] + 1;
+	}
+
+	if (lease->addr.s_addr && !IN_LINKLOCAL(htonl(lease->addr.s_addr))) {
+		if (type == DHCP_DECLINE ||
+		    type == DHCP_DISCOVER ||
+		    (type == DHCP_REQUEST &&
+		     lease->addr.s_addr != iface->addr.s_addr))
+		{
+			PUTADDR(DHO_IPADDRESS, lease->addr);
+			if (lease->server.s_addr)
+				PUTADDR(DHO_SERVERID, lease->server);
+		}
+	}
+
+	if (type == DHCP_DECLINE) {
+		*p++ = DHO_MESSAGE;
+		len = strlen(DAD);
+		*p++ = len;
+		memcpy(p, DAD, len);
+		p += len;
+	}
+
+	if (type == DHCP_RELEASE) {
+		if (lease->server.s_addr)
+			PUTADDR(DHO_SERVERID, lease->server);
+	}
+
+	if (type == DHCP_DISCOVER ||
+	    type == DHCP_INFORM ||
+	    type == DHCP_REQUEST)
+	{
 		*p++ = DHO_MAXMESSAGESIZE;
 		*p++ = 2;
 		sz = get_mtu(iface->name);
@@ -813,15 +863,7 @@ make_message(struct dhcp_message **message,
 		sz = htons(sz);
 		memcpy(p, &sz, 2);
 		p += 2;
-	}
 
-	if (iface->clientid) {
-		*p++ = DHO_CLIENTID;
-		memcpy(p, iface->clientid, iface->clientid[0] + 1);
-		p += iface->clientid[0] + 1;
-	}
-
-	if (type != DHCP_DECLINE && type != DHCP_RELEASE) {
 		if (options->userclass[0]) {
 			*p++ = DHO_USERCLASS;
 			memcpy(p, options->userclass, options->userclass[0] + 1);
@@ -834,43 +876,31 @@ make_message(struct dhcp_message **message,
 			       options->vendorclassid[0] + 1);
 			p += options->vendorclassid[0] + 1;
 		}
-	}
 
-	if (type == DHCP_DISCOVER || type == DHCP_REQUEST) {
-#define PUTADDR(_type, _val) \
-		{ \
-			*p++ = _type; \
-			*p++ = 4; \
-			memcpy(p, &_val.s_addr, 4); \
-			p += 4; \
+		if (type != DHCP_INFORM) {
+			if (options->leasetime != 0) {
+				*p++ = DHO_LEASETIME;
+				*p++ = 4;
+				ul = htonl(options->leasetime);
+				memcpy(p, &ul, 4);
+				p += 4;
+			}
 		}
-		if (lease->addr.s_addr &&
-		    lease->addr.s_addr != iface->addr.s_addr &&
-		    !IN_LINKLOCAL(ntohl(lease->addr.s_addr)))
-		{
-			PUTADDR(DHO_IPADDRESS, lease->addr);
-			if (lease->server.s_addr)
-				PUTADDR(DHO_SERVERID, lease->server);
-		}
-#undef PUTADDR
 
-		if (options->leasetime != 0) {
-			*p++ = DHO_LEASETIME;
-			*p++ = 4;
-			ul = htonl(options->leasetime);
-			memcpy(p, &ul, 4);
-			p += 4;
-		}
-	}
-
-	if (type == DHCP_DISCOVER ||
-	    type == DHCP_INFORM ||
-	    type == DHCP_REQUEST)
-	{
+		/* Regardless of RFC2132, we should always send a hostname
+		 * upto the first dot (the short hostname) as otherwise
+		 * confuses some DHCP servers when updating DNS.
+		 * The FQDN option should be used if a FQDN is required. */
 		if (options->hostname[0]) {
 			*p++ = DHO_HOSTNAME;
-			memcpy(p, options->hostname, options->hostname[0] + 1);
-			p += options->hostname[0] + 1;
+			hp = strchr(options->hostname, '.');
+			if (hp)
+				len = hp - options->hostname;
+			else
+				len = strlen(options->hostname);
+			*p++ = len;
+			memcpy(p, options->hostname, len);
+			p += len;
 		}
 		if (options->fqdn != FQDN_DISABLE) {
 			/* IETF DHC-FQDN option (81), RFC4702 */
@@ -890,8 +920,7 @@ make_message(struct dhcp_message **message,
 			*p++ = (options->fqdn & 0x09) | 0x04;
 			*p++ = 0; /* from server for PTR RR */
 			*p++ = 0; /* from server for A RR if S=1 */
-			ul = encode_rfc1035(options->hostname + 1, p,
-					options->hostname[0]);
+			ul = encode_rfc1035(options->hostname, p);
 			*lp += ul;
 			p += ul;
 		}
@@ -999,13 +1028,21 @@ static ssize_t
 print_string(char *s, ssize_t len, int dl, const uint8_t *data)
 {
 	uint8_t c;
-	const uint8_t *e;
+	const uint8_t *e, *p;
 	ssize_t bytes = 0;
 	ssize_t r;
 
 	e = data + dl;
 	while (data < e) {
 		c = *data++;
+		if (c == '\0') {
+			/* If rest is all NULL, skip it. */
+			for (p = data; p < e; p++)
+				if (*p != '\0')
+					break;
+			if (p == e)
+				break;
+		}
 		if (!isascii(c) || !isprint(c)) {
 			if (s) {
 				if (len < 5) {
@@ -1203,16 +1240,16 @@ configure_env(char **env, const char *prefix, const struct dhcp_message *dhcp,
 		 * message but are not necessarily in the options */
 		addr.s_addr = dhcp->yiaddr;
 		setvar(&ep, prefix, "ip_address", inet_ntoa(addr));
-		if (get_option_addr(&net.s_addr, dhcp, DHO_SUBNETMASK) == -1) {
+		if (get_option_addr(&net, dhcp, DHO_SUBNETMASK) == -1) {
 			net.s_addr = get_netmask(addr.s_addr);
 			setvar(&ep, prefix, "subnet_mask", inet_ntoa(net));
 		}
 		i = inet_ntocidr(net);
 		snprintf(cidr, sizeof(cidr), "%d", inet_ntocidr(net));
 		setvar(&ep, prefix, "subnet_cidr", cidr);
-		if (get_option_addr(&brd.s_addr, dhcp, DHO_BROADCAST) == -1) {
+		if (get_option_addr(&brd, dhcp, DHO_BROADCAST) == -1) {
 			brd.s_addr = addr.s_addr | ~net.s_addr;
-			setvar(&ep, prefix, "broadcast_address", inet_ntoa(net));
+			setvar(&ep, prefix, "broadcast_address", inet_ntoa(brd));
 		}
 		addr.s_addr = dhcp->yiaddr & net.s_addr;
 		setvar(&ep, prefix, "network_number", inet_ntoa(addr));

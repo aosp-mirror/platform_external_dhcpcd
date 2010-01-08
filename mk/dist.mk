@@ -1,5 +1,5 @@
-# rules to make a distribution tarball from a git repo
-# Copyright 2008 Roy Marples <roy@marples.name>
+# rules to make a distribution tarball from a svn repo
+# Copyright 2008-2009 Roy Marples <roy@marples.name>
 
 GITREF?=	HEAD
 DISTPREFIX?=	${PROG}-${VERSION}

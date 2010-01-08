@@ -69,7 +69,8 @@ get_line(char **line, size_t *len, FILE *fp)
 		}
 		p = *line + last;
 		memset(p, 0, BUFSIZ);
-		fgets(p, BUFSIZ, fp);
+		if (fgets(p, BUFSIZ, fp) == NULL)
+			break;
 		last += strlen(p);
 		if (last && (*line)[last - 1] == '\n') {
 			(*line)[last - 1] = '\0';
@@ -201,9 +202,8 @@ get_monotonic(struct timeval *tp)
 	if (posix_clock_set == 0) {
 		if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
 			posix_clock = CLOCK_MONOTONIC;
-			clock_monotonic = 1;
+			clock_monotonic = posix_clock_set = 1;
 		}
-		posix_clock_set = 1;
 	}
 
 	if (clock_monotonic) {
@@ -225,9 +225,8 @@ get_monotonic(struct timeval *tp)
 	if (posix_clock_set == 0) {
 		if (mach_timebase_info(&info) == KERN_SUCCESS) {
 			factor = (double)info.numer / (double)info.denom;
-			clock_monotonic = 1;	
+			clock_monotonic = posix_clock_set = 1;
 		}
-		posix_clock_set = 1;
 	}
 	if (clock_monotonic) {
 		nano = mach_absolute_time();

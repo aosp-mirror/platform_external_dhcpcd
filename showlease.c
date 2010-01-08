@@ -258,7 +258,7 @@ exit:
 }
 
 int
-get_option_addr(uint32_t *a, const struct dhcp_message *dhcp, uint8_t option)
+get_option_addr32(uint32_t *a, const struct dhcp_message *dhcp, uint8_t option)
 {
 	const uint8_t *p = get_option_raw(dhcp, option);
 
@@ -273,7 +273,7 @@ get_option_uint32(uint32_t *i, const struct dhcp_message *dhcp, uint8_t option)
 {
 	uint32_t a;
 
-	if (get_option_addr(&a, dhcp, option) == -1)
+	if (get_option_addr32(&a, dhcp, option) == -1)
 		return -1;
 
 	*i = ntohl(a);
@@ -330,11 +330,11 @@ main(int argc, char *argv[])
     lease->frominfo = 0;
     lease->addr.s_addr = dhcp->yiaddr;
 
-    if (get_option_addr(&lease->net.s_addr, dhcp, DHO_SUBNETMASK) == -1)
+    if (get_option_addr32(&lease->net.s_addr, dhcp, DHO_SUBNETMASK) == -1)
         lease->net.s_addr = get_netmask(dhcp->yiaddr);
     if (get_option_uint32(&lease->leasetime, dhcp, DHO_LEASETIME) != 0)
         lease->leasetime = DEFAULT_LEASETIME;
-    get_option_addr(&lease->server.s_addr, dhcp, DHO_SERVERID);
+    get_option_addr32(&lease->server.s_addr, dhcp, DHO_SERVERID);
     /* Dm: limit lease time value to avoid negative numbers when
        converting to milliseconds */		
     if ((lease->leasetime != ~0U) && (lease->leasetime > MAX_LEASETIME))

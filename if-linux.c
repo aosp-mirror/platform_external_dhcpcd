@@ -317,7 +317,7 @@ if_address(const char *ifname,
 }
 
 int
-if_route(const char *ifname,
+if_route(const struct interface *iface,
 	 const struct in_addr *destination, const struct in_addr *netmask,
 	 const struct in_addr *gateway, int metric, int action)
 {
@@ -325,8 +325,7 @@ if_route(const char *ifname,
 	unsigned int ifindex;
 	int retval = 0;
 
-
-	if (!(ifindex = if_nametoindex(ifname))) {
+	if (!(ifindex = if_nametoindex(iface->name))) {
 		errno = ENODEV;
 		return -1;
 	}
@@ -335,8 +334,8 @@ if_route(const char *ifname,
 	nlm->hdr.nlmsg_len = NLMSG_LENGTH(sizeof(struct rtmsg));
 	nlm->hdr.nlmsg_type = RTM_NEWROUTE;
 	if (action == 0)
-            nlm->hdr.nlmsg_flags = NLM_F_REPLACE;
-	else if (action > 0)
+		nlm->hdr.nlmsg_flags = NLM_F_REPLACE;
+	else if (action == 1)
 		/*
 		 * ers@google:
 		 * commented out NLM_F_EXCL here and below. We
@@ -351,12 +350,20 @@ if_route(const char *ifname,
 	nlm->rt.rtm_family = AF_INET;
 	nlm->rt.rtm_table = RT_TABLE_MAIN;
 
-	if (action < 0)
+	if (action == -1 || action == -2)
 		nlm->rt.rtm_scope = RT_SCOPE_NOWHERE;
 	else {
 		nlm->hdr.nlmsg_flags |= NLM_F_CREATE /*| NLM_F_EXCL*/;
-		nlm->rt.rtm_protocol = RTPROT_BOOT;
-		if (gateway->s_addr == INADDR_ANY)
+		/* We only change route metrics for kernel routes */
+		if (destination->s_addr ==
+		    (iface->addr.s_addr & iface->net.s_addr) &&
+		    netmask->s_addr == iface->net.s_addr)
+			nlm->rt.rtm_protocol = RTPROT_KERNEL;
+		else
+			nlm->rt.rtm_protocol = RTPROT_BOOT;
+		if (gateway->s_addr == INADDR_ANY ||
+		    (gateway->s_addr == destination->s_addr &&
+		     netmask->s_addr == INADDR_BROADCAST))
 			nlm->rt.rtm_scope = RT_SCOPE_LINK;
 		else
 			nlm->rt.rtm_scope = RT_SCOPE_UNIVERSE;
@@ -366,8 +373,15 @@ if_route(const char *ifname,
 	nlm->rt.rtm_dst_len = inet_ntocidr(*netmask);
 	add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_DST,
 		   &destination->s_addr, sizeof(destination->s_addr));
-	add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_GATEWAY,
-		   &gateway->s_addr, sizeof(gateway->s_addr));
+	if (nlm->rt.rtm_protocol == RTPROT_KERNEL) {
+		add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_PREFSRC,
+			   &iface->addr.s_addr, sizeof(iface->addr.s_addr));
+	}
+	/* If destination == gateway then don't add the gateway */
+	if (destination->s_addr != gateway->s_addr ||
+	    netmask->s_addr != INADDR_BROADCAST)
+		add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_GATEWAY,
+			   &gateway->s_addr, sizeof(gateway->s_addr));
 
 	add_attr_32(&nlm->hdr, sizeof(*nlm), RTA_OIF, ifindex);
 	add_attr_32(&nlm->hdr, sizeof(*nlm), RTA_PRIORITY, metric);
