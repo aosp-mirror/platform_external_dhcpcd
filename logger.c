@@ -35,6 +35,10 @@
 #include "common.h"
 #include "logger.h"
 
+#ifdef ANDROID
+#include <android/log.h>
+#endif
+
 static int loglevel = LOG_INFO;
 static char logprefix[12] = {0};
 
@@ -59,6 +63,14 @@ logger(int level, const char *fmt, ...)
 	char *fmt2, *pf;
 
 	va_start(p, fmt);
+#ifdef ANDROID
+	if (level <= LOG_ERR) {
+		level = ANDROID_LOG_ERROR;
+	} else {
+		level = ANDROID_LOG_DEBUG;
+	}
+	__android_log_vprint(level, "dhcpcd", fmt, p);
+#else
 	va_copy(p2, p);
 
 	if (level <= LOG_ERR || level <= loglevel) {
@@ -85,5 +97,6 @@ logger(int level, const char *fmt, ...)
 	}
 
 	va_end(p2);
+#endif
 	va_end(p);
 }
