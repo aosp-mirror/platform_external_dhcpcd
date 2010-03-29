@@ -39,7 +39,7 @@
 #include <android/log.h>
 #endif
 
-static int loglevel = LOG_INFO;
+static int loglevel = LOG_ERR;
 static char logprefix[12] = {0};
 
 void
@@ -64,12 +64,14 @@ logger(int level, const char *fmt, ...)
 
 	va_start(p, fmt);
 #ifdef ANDROID
-	if (level <= LOG_ERR) {
-		level = ANDROID_LOG_ERROR;
-	} else {
-		level = ANDROID_LOG_DEBUG;
+	if (level <= loglevel) {
+		if (level <= LOG_ERR) {
+			level = ANDROID_LOG_ERROR;
+		} else {
+			level = ANDROID_LOG_DEBUG;
+		}
+		__android_log_vprint(level, "dhcpcd", fmt, p);
 	}
-	__android_log_vprint(level, "dhcpcd", fmt, p);
 #else
 	va_copy(p2, p);
 
