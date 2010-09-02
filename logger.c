@@ -39,7 +39,7 @@
 #include <android/log.h>
 #endif
 
-static int loglevel = LOG_ERR;
+static int loglevel = LOG_INFO;
 static char logprefix[12] = {0};
 
 void
