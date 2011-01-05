@@ -6,7 +6,7 @@
 setprop dhcp.${interface}.reason "${reason}"
 
 case "${reason}" in
-BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT)
+BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT|IPV4LL)
     setprop dhcp.${interface}.ipaddress "${new_ip_address}"
     setprop dhcp.${interface}.gateway   "${new_routers%% *}"
     setprop dhcp.${interface}.mask      "${new_subnet_mask}"
@@ -16,7 +16,7 @@ BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT)
     setprop dhcp.${interface}.result "ok"
     ;;
 
-EXPIRE|FAIL|IPV4LL|STOP)
+EXPIRE|FAIL|STOP)
     setprop dhcp.${interface}.result "failed"
     ;;
 
