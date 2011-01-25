@@ -1,7 +1,7 @@
 # Copyright 2010 Google Inc. All Rights Reserved.
 #Fri Jul 16 10:03:08 PDT 2010
-currentVersion=5.1.5
-version=4.0.1
+currentVersion=5.2.10
+version=5.2.10
 isNative=true
 feedurl=http\://git.marples.name/projects/dhcpcd/wiki
 name=dhcpcd

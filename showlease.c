@@ -6,6 +6,10 @@
 #include "dhcp.h"
 #include "config.h"
 
+#ifndef DEFAULT_LEASETIME
+#define DEFAULT_LEASETIME	3600	/* 1 hour */
+#endif
+
 #define REQUEST	(1 << 0)
 #define UINT8	(1 << 1)
 #define UINT16	(1 << 2)
@@ -119,7 +123,7 @@ static const struct dhcp_opt const dhcp_opts[] = {
 };
 
 struct dhcp_message *
-get_lease(const char *leasefile)
+get_lease_from_file(const char *leasefile)
 {
 	int fd;
 	struct dhcp_message *dhcp;
@@ -322,7 +326,7 @@ main(int argc, char *argv[])
         exit(1);
     }
     snprintf(leasefile, PATH_MAX, LEASEFILE, argv[1]);
-    if ((dhcp = get_lease(leasefile)) == NULL) {
+    if ((dhcp = get_lease_from_file(leasefile)) == NULL) {
         fprintf(stderr, "Couldn't read lease file: %s\n", strerror(errno));
         exit(1);
     }

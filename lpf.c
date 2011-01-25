@@ -1,6 +1,6 @@
 /*
  * dhcpcd - DHCP client daemon
- * Copyright 2006-2008 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2009 Roy Marples <roy@marples.name>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +37,7 @@
 # include <asm/types.h> /* needed for 2.4 kernels for the below header */
 # include <linux/filter.h>
 # include <netpacket/packet.h>
-# define bpf_insn sock_filter
+# define bpf_insn		sock_filter
 # define BPF_SKIPTYPE
 # define BPF_ETHCOOK		-ETH_HLEN
 # define BPF_WHOLEPACKET	0x0fffffff /* work around buggy LPF filters */
@@ -120,7 +120,7 @@ eexit:
 
 ssize_t
 send_raw_packet(const struct interface *iface, int protocol,
-		const void *data, ssize_t len)
+    const void *data, ssize_t len)
 {
 	union sockunion {
 		struct sockaddr sa;
@@ -140,7 +140,7 @@ send_raw_packet(const struct interface *iface, int protocol,
 	su.sll.sll_halen = iface->hwlen;
 	if (iface->family == ARPHRD_INFINIBAND)
 		memcpy(&su.sll.sll_addr,
-		       &ipv4_bcast_addr, sizeof(ipv4_bcast_addr));
+		    &ipv4_bcast_addr, sizeof(ipv4_bcast_addr));
 	else
 		memset(&su.sll.sll_addr, 0xff, iface->hwlen);
 	if (protocol == ETHERTYPE_ARP)

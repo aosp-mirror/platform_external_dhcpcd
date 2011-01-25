@@ -7,17 +7,20 @@ hooks_dir := dhcpcd-hooks
 hooks_target := $(etc_dir)/$(hooks_dir)
 
 include $(CLEAR_VARS)
-LOCAL_SRC_FILES := common.c dhcp.c dhcpcd.c logger.c net.c \
-	signals.c configure.c client.c if-linux.c lpf.c
-LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
-LOCAL_SHARED_LIBRARIES := libc libcutils
+LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
+	eloop.c if-options.c if-pref.c ipv4ll.c net.c signals.c configure.c \
+	if-linux.c if-linux-wireless.c lpf.c compat/getline.c \
+	platform-linux.c compat/closefrom.c ifaddrs.c
+
+#LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
+LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils
 LOCAL_MODULE = dhcpcd
 LOCAL_MODULE_TAGS := user
 include $(BUILD_EXECUTABLE)
 
 include $(CLEAR_VARS)
 LOCAL_SRC_FILES := showlease.c
-LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
+#LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_SHARED_LIBRARIES := libc
 LOCAL_MODULE = showlease
 LOCAL_MODULE_TAGS := debug
