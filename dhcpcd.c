@@ -70,6 +70,13 @@ const char copyright[] = "Copyright (c) 2006-2010 Roy Marples";
 #include "net.h"
 #include "signals.h"
 
+#ifdef ANDROID
+#include <linux/capability.h>
+#include <linux/prctl.h>
+#include <cutils/properties.h>
+#include <private/android_filesystem_config.h>
+#endif
+
 /* We should define a maximum for the NAK exponential backoff */ 
 #define NAKOFF_MAX              60
 
@@ -1151,7 +1158,7 @@ start_interface(void *arg)
 			/* Offset lease times and check expiry */
 			gettimeofday(&now, NULL);
 			if ((time_t)iface->state->lease.leasetime <
-			    now.tv_sec - st.st_mtime)
+			    (time_t)(now.tv_sec - st.st_mtime))
 			{
 				syslog(LOG_DEBUG,
 				    "%s: discarding expired lease",
@@ -1702,6 +1709,29 @@ close_sockets(struct interface *iface)
 	}
 }
 
+#ifdef ANDROID
+void switchUser(void)
+{
+	gid_t groups[] = { AID_INET, AID_SHELL };
+	struct __user_cap_header_struct header;
+	struct __user_cap_data_struct cap;
+
+	setgroups(sizeof(groups)/sizeof(groups[0]), groups);
+
+	prctl(PR_SET_KEEPCAPS, 1, 0, 0, 0);
+
+	setgid(AID_DHCP);
+	setuid(AID_DHCP);
+	header.version = _LINUX_CAPABILITY_VERSION;
+	header.pid = 0;
+	cap.effective = cap.permitted =
+		(1 << CAP_NET_ADMIN) | (1 << CAP_NET_RAW) |
+		(1 << CAP_NET_BROADCAST) | (1 << CAP_NET_BIND_SERVICE);
+	cap.inheritable = 0;
+	capset(&header, &cap);
+}
+#endif /* ANDROID */
+
 int
 main(int argc, char **argv)
 {
@@ -1711,6 +1741,9 @@ main(int argc, char **argv)
 	pid_t pid;
 	struct timespec ts;
 
+#ifdef ANDROID
+	switchUser();
+#endif
 	closefrom(3);
 	openlog(PACKAGE, LOG_PERROR | LOG_PID, LOG_DAEMON);
 	setlogmask(LOG_UPTO(LOG_INFO));
@@ -1854,12 +1887,28 @@ main(int argc, char **argv)
 		}
 	}
 
+#ifndef ANDROID
+	/* android runs us as user "dhcp" */
 	if (geteuid())
 		syslog(LOG_WARNING,
 		    PACKAGE " will not work correctly unless run as root");
-
+#endif
 	if (sig != 0) {
+#ifdef ANDROID
+		char pidpropname[PROPERTY_KEY_MAX];
+		char pidpropval[PROPERTY_VALUE_MAX];
+
+		if (snprintf(pidpropname,
+			     sizeof(pidpropname),
+			     "dhcp.%s.pid", iface->name) >= PROPERTY_KEY_MAX)
+			exit(EXIT_FAILURE);
+		property_get(pidpropname, pidpropval, NULL);
+		if (strlen(pidpropval) == 0)
+			exit(EXIT_FAILURE);
+		pid = atoi(pidpropval);
+#else
 		pid = read_pid();
+#endif
 		if (pid != 0)
 			syslog(LOG_INFO, "sending signal %d to pid %d",
 			    sig, pid);
@@ -1891,6 +1940,11 @@ main(int argc, char **argv)
 	}
 
 	if (!(options & DHCPCD_TEST)) {
+#ifdef ANDROID
+		char pidpropname[PROPERTY_KEY_MAX];
+		char pidpropval[PROPERTY_VALUE_MAX];
+#endif
+#ifndef ANDROID
 		if ((pid = read_pid()) > 0 &&
 		    kill(pid, 0) == 0)
 		{
@@ -1909,7 +1963,7 @@ main(int argc, char **argv)
 			syslog(LOG_ERR, "mkdir `%s': %m", DBDIR);
 			exit(EXIT_FAILURE);
 		}
-
+#endif
 		pidfd = open(pidfile, O_WRONLY | O_CREAT | O_NONBLOCK, 0664);
 		if (pidfd == -1) {
 			syslog(LOG_ERR, "open `%s': %m", pidfile);
@@ -1923,7 +1977,17 @@ main(int argc, char **argv)
 		}
 		if (set_cloexec(pidfd) == -1)
 			exit(EXIT_FAILURE);
+#ifdef ANDROID
+		if (snprintf(pidpropname,
+			     sizeof(pidpropname),
+			     "dhcp.%s.pid", iface->name) >= PROPERTY_KEY_MAX)
+			exit(EXIT_FAILURE);
+		if (snprintf(pidpropval, sizeof(pidpropval), "%d", getpid()) >= PROPERTY_VALUE_MAX)
+			exit(EXIT_FAILURE);
+		property_set(pidpropname, pidpropval);
+#else
 		writepid(pidfd, getpid());
+#endif
 	}
 
 	syslog(LOG_INFO, "version " VERSION " starting");

@@ -7,6 +7,7 @@
 #include "compat/arc4random.h"
 #include "compat/closefrom.h"
 #include "compat/strlcpy.h"
+#include "compat/getline.h"
 
 #ifndef MAX
 #define MAX(a,b)	((a) >= (b) ? (a) : (b))

@@ -528,7 +528,7 @@ if_route(const struct interface *iface,
 	if (action == 0)
 		nlm->hdr.nlmsg_flags = NLM_F_REPLACE;
 	else if (action == 1)
-		nlm->hdr.nlmsg_flags = NLM_F_CREATE | NLM_F_EXCL;
+		nlm->hdr.nlmsg_flags = NLM_F_CREATE /*| NLM_F_EXCL*/;
 	else
 		nlm->hdr.nlmsg_type = RTM_DELROUTE;
 	nlm->hdr.nlmsg_flags |= NLM_F_REQUEST;
@@ -538,7 +538,7 @@ if_route(const struct interface *iface,
 	if (action == -1 || action == -2)
 		nlm->rt.rtm_scope = RT_SCOPE_NOWHERE;
 	else {
-		nlm->hdr.nlmsg_flags |= NLM_F_CREATE | NLM_F_EXCL;
+		nlm->hdr.nlmsg_flags |= NLM_F_CREATE /*| NLM_F_EXCL*/;
 		/* We only change route metrics for kernel routes */
 		if (destination->s_addr ==
 		    (iface->addr.s_addr & iface->net.s_addr) &&

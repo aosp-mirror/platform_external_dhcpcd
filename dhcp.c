@@ -839,7 +839,6 @@ make_message(struct dhcp_message **message,
 	const struct if_options *ifo = iface->state->options;
 	const struct dhcp_lease *lease = &iface->state->lease;
 
-	printf("%s: Start\n", __func__);
 	dhcp = xzalloc(sizeof (*dhcp));
 	m = (uint8_t *)dhcp;
 	p = dhcp->options;
@@ -1056,6 +1055,13 @@ write_lease(const struct interface *iface, const struct dhcp_message *dhcp)
 	    iface->name, iface->leasefile);
 
 	fd = open(iface->leasefile, O_WRONLY | O_CREAT | O_TRUNC, 0444);
+#ifdef ANDROID
+	if (fd == -1 && errno == EACCES) {
+		/* the lease file might have been created when dhcpcd was running as root */
+		unlink(iface->leasefile);
+		fd = open(iface->leasefile, O_WRONLY | O_CREAT | O_TRUNC, 0444);
+	}
+#endif
 	if (fd == -1) {
 		syslog(LOG_ERR, "%s: open: %m", iface->name);
 		return -1;
