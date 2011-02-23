@@ -664,11 +664,14 @@ main(int argc, char **argv)
 					     VENDORCLASSID_MAX_LEN,
 					     "%s %s", PACKAGE, VERSION);
 
-#ifdef CMDLINE_COMPAT
-	options->options |= DHCPCD_CLIENTID;
+	/* Explicitly include DNS in the list of parameters requested in the DNS request.
+	 * Without this some DHCP servers may skip the DNS entries in the DHCP replies.*/
 	add_option_mask(options->requestmask, DHO_DNSSERVER);
 	add_option_mask(options->requestmask, DHO_DNSDOMAIN);
 	add_option_mask(options->requestmask, DHO_DNSSEARCH);
+
+#ifdef CMDLINE_COMPAT
+	options->options |= DHCPCD_CLIENTID;
 	add_option_mask(options->requestmask, DHO_NISSERVER);
 	add_option_mask(options->requestmask, DHO_NISDOMAIN);
 	add_option_mask(options->requestmask, DHO_NTPSERVER);
