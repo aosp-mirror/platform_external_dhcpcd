@@ -1898,9 +1898,14 @@ main(int argc, char **argv)
 		char pidpropname[PROPERTY_KEY_MAX];
 		char pidpropval[PROPERTY_VALUE_MAX];
 
+		if (optind != argc - 1) {
+			syslog(LOG_ERR, "Android requires an interface");
+			exit(EXIT_FAILURE);
+		}
+
 		if (snprintf(pidpropname,
 			     sizeof(pidpropname),
-			     "dhcp.%s.pid", iface->name) >= PROPERTY_KEY_MAX)
+			     "dhcp.%s.pid", argv[optind]) >= PROPERTY_KEY_MAX)
 			exit(EXIT_FAILURE);
 		property_get(pidpropname, pidpropval, NULL);
 		if (strlen(pidpropval) == 0)
@@ -1978,9 +1983,14 @@ main(int argc, char **argv)
 		if (set_cloexec(pidfd) == -1)
 			exit(EXIT_FAILURE);
 #ifdef ANDROID
+		if (optind != argc - 1) {
+			syslog(LOG_ERR, "Android requires an interface");
+			exit(EXIT_FAILURE);
+		}
+
 		if (snprintf(pidpropname,
 			     sizeof(pidpropname),
-			     "dhcp.%s.pid", iface->name) >= PROPERTY_KEY_MAX)
+			     "dhcp.%s.pid", argv[optind]) >= PROPERTY_KEY_MAX)
 			exit(EXIT_FAILURE);
 		if (snprintf(pidpropval, sizeof(pidpropval), "%d", getpid()) >= PROPERTY_VALUE_MAX)
 			exit(EXIT_FAILURE);
