@@ -318,7 +318,7 @@ exit:
 		*len = bl;
 	if (bp) {
 		memcpy(bp, op, ol);
-		return (const uint8_t *)&dhcp_opt_buffer;
+		return (const uint8_t *)dhcp_opt_buffer;
 	}
 	if (op)
 		return op;
