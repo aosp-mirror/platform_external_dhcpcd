@@ -1,0 +1,8 @@
+Change-Id: Id93a6d5d8ae4ffd9b12519e4e661fd095c1a8929
+Code-Review+2: Jean-Baptiste Queru <jbq@google.com>
+Verified+1: Jean-Baptiste Queru <jbq@google.com>
+Submitted-by: Jean-Baptiste Queru <jbq@google.com>
+Submitted-at: Wed, 18 Mar 2009 17:56:04 -0700
+Reviewed-on: https://review.source.android.com/9254
+Project: platform/external/dhcpcd
+Branch: refs/heads/master
