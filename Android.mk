@@ -1,5 +1,4 @@
 # Copyright 2006 The Android Open Source Project
-ifneq ($(TARGET_SIMULATOR),true)
 LOCAL_PATH:= $(call my-dir)
 
 etc_dir := $(TARGET_OUT)/etc/dhcpcd
@@ -57,5 +56,3 @@ LOCAL_MODULE_CLASS := ETC
 LOCAL_MODULE_PATH := $(hooks_target)
 LOCAL_SRC_FILES := $(hooks_dir)/$(LOCAL_MODULE)
 include $(BUILD_PREBUILT)
-
-endif
