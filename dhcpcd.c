@@ -1474,6 +1474,12 @@ handle_signal(_unused void *arg)
 		syslog(LOG_INFO, "received SIGTERM, stopping");
 		break;
 	case SIGALRM:
+#ifdef ANDROID
+		syslog(LOG_INFO, "received SIGALRM, renewing");
+		for (ifp = ifaces; ifp; ifp = ifp->next) {
+			start_renew(ifp);
+		}
+#else
 		syslog(LOG_INFO, "received SIGALRM, rebinding");
 		for (i = 0; i < ifac; i++)
 			free(ifav[i]);
@@ -1495,6 +1501,7 @@ handle_signal(_unused void *arg)
 		options = ifo->options;
 		free_options(ifo);
 		reconf_reboot(1, 0, NULL, 0);
+#endif
 		return;
 	case SIGHUP:
 		syslog(LOG_INFO, "received SIGHUP, releasing");
