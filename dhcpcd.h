@@ -119,6 +119,7 @@ extern char **ifav;
 extern int ifdc;
 extern char **ifdv;
 extern struct interface *ifaces;
+extern int avoid_routes;
 
 struct interface *find_interface(const char *);
 int handle_args(struct fd_list *, int, char **);

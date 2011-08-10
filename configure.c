@@ -640,6 +640,8 @@ build_routes(void)
 	struct rt *nrs = NULL, *dnr, *or, *rt, *rtn, *rtl, *lrt = NULL;
 	const struct interface *ifp;
 
+	if (avoid_routes) return;
+
 	for (ifp = ifaces; ifp; ifp = ifp->next) {
 		if (ifp->state->new == NULL)
 			continue;
@@ -758,17 +760,20 @@ configure(struct interface *iface)
 	iface->addr.s_addr = lease->addr.s_addr;
 	iface->net.s_addr = lease->net.s_addr;
 
-	/* We need to delete the subnet route to have our metric or
-	 * prefer the interface. */
-	rt = get_subnet_route(dhcp);
-	if (rt != NULL) {
-		rt->iface = iface;
-		if (!find_route(routes, rt, NULL, NULL))
-			del_route(iface, &rt->dest, &rt->net, &rt->gate, 0);
-		free(rt);
+	if (!avoid_routes) {
+		/* We need to delete the subnet route to have our metric or
+		 * prefer the interface. */
+		rt = get_subnet_route(dhcp);
+		if (rt != NULL) {
+			rt->iface = iface;
+			if (!find_route(routes, rt, NULL, NULL))
+				del_route(iface, &rt->dest, &rt->net, &rt->gate, 0);
+			free(rt);
+		}
+
+		build_routes();
 	}
 
-	build_routes();
 	if (!iface->state->lease.frominfo &&
 	    !(ifo->options & (DHCPCD_INFORM | DHCPCD_STATIC)))
 		if (write_lease(iface, dhcp) == -1)

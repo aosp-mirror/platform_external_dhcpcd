@@ -333,6 +333,7 @@ parse_option(struct if_options *ifo, int opt, const char *arg)
 	struct rt *rt;
 
 	switch(opt) {
+	case 'a': /* FALLTHROUGH */
 	case 'f': /* FALLTHROUGH */
 	case 'g': /* FALLTHROUGH */
 	case 'n': /* FALLTHROUGH */

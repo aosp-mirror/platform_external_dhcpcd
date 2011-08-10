@@ -92,6 +92,8 @@ int ifac = 0;
 char **ifav = NULL;
 int ifdc = 0;
 char **ifdv = NULL;
+/* If set, avoid routes after a DHCP success */
+int avoid_routes = 0;
 
 static char **margv;
 static int margc;
@@ -151,7 +153,7 @@ read_pid(void)
 static void
 usage(void)
 {
-	printf("usage: "PACKAGE" [-dgknpqwxyADEGHJKLOTV] [-c script] [-f file]"
+	printf("usage: "PACKAGE" [-adgknpqwxyADEGHJKLOTV] [-c script] [-f file]"
 	    " [-e var=val]\n"
 	    "              [-h hostname] [-i classID ] [-l leasetime]"
 	    " [-m metric] [-o option]\n"
@@ -1790,6 +1792,9 @@ main(int argc, char **argv)
 			break;
 		case 'U':
 			i = 2;
+			break;
+		case 'a':
+			avoid_routes = 1;
 			break;
 		case 'V':
 			print_options();
