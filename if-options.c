@@ -793,6 +793,7 @@ read_config(const char *file,
 		ifo->hostname[0] = '\0';
 
 	platform = hardware_platform();
+#ifndef ANDROID
 	if (uname(&utn) == 0)
 		ifo->vendorclassid[0] = snprintf((char *)ifo->vendorclassid + 1,
 		    VENDORCLASSID_MAX_LEN,
@@ -800,6 +801,7 @@ read_config(const char *file,
 		    utn.sysname, utn.release, utn.machine,
 		    platform ? ":" : "", platform ? platform : "");
 	else
+#endif
 		ifo->vendorclassid[0] = snprintf((char *)ifo->vendorclassid + 1,
 		    VENDORCLASSID_MAX_LEN, "%s-%s", PACKAGE, VERSION);
 
