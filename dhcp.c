@@ -78,7 +78,9 @@ static const struct dhcp_opt const dhcp_opts[] = {
 	{ 2,	UINT32,		"time_offset" },
 	{ 4,	IPV4 | ARRAY,	"time_servers" },
 	{ 5,	IPV4 | ARRAY,	"ien116_name_servers" },
-	{ 6,	IPV4 | ARRAY,	"domain_name_servers" },
+        /* Explicitly include DNS in the list of parameters requested in the DNS request.
+         * Without this some DHCP servers may skip the DNS entries in the DHCP replies.*/
+	{ 6,	IPV4 | ARRAY | REQUEST, "domain_name_servers" },
 	{ 7,	IPV4 | ARRAY,	"log_servers" },
 	{ 8,	IPV4 | ARRAY,	"cookie_servers" },
 	{ 9, 	IPV4 | ARRAY,	"lpr_servers" },
@@ -87,7 +89,9 @@ static const struct dhcp_opt const dhcp_opts[] = {
 	{ 12,	STRING,		"host_name" },
 	{ 13,	UINT16,		"boot_size" },
 	{ 14,	STRING,		"merit_dump" },
-	{ 15,	STRING,		"domain_name" },
+        /* Explicitly include DNS in the list of parameters requested in the DNS request.
+         * Without this some DHCP servers may skip the DNS entries in the DHCP replies.*/
+	{ 15,	STRING | REQUEST, "domain_name" },
 	{ 16,	IPV4,		"swap_server" },
 	{ 17,	STRING,		"root_path" },
 	{ 18,	STRING,		"extensions_path" },
