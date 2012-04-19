@@ -7,11 +7,12 @@ setprop dhcp.${interface}.reason "${reason}"
 
 case "${reason}" in
 BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT)
-    setprop dhcp.${interface}.ipaddress "${new_ip_address}"
-    setprop dhcp.${interface}.gateway   "${new_routers%% *}"
-    setprop dhcp.${interface}.mask      "${new_subnet_mask}"
-    setprop dhcp.${interface}.leasetime "${new_dhcp_lease_time}"
-    setprop dhcp.${interface}.server    "${new_dhcp_server_identifier}"
+    setprop dhcp.${interface}.ipaddress  "${new_ip_address}"
+    setprop dhcp.${interface}.gateway    "${new_routers%% *}"
+    setprop dhcp.${interface}.mask       "${new_subnet_mask}"
+    setprop dhcp.${interface}.leasetime  "${new_dhcp_lease_time}"
+    setprop dhcp.${interface}.server     "${new_dhcp_server_identifier}"
+    setprop dhcp.${interface}.vendorInfo "${new_vendor_encapsulated_options}"
 
     setprop dhcp.${interface}.result "ok"
     ;;
