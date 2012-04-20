@@ -79,4 +79,33 @@ void *xmalloc(size_t);
 void *xzalloc(size_t);
 char *xstrdup(const char *);
 
+/* Uncomment the #def below to send DHCPCD syslog messages to Android's logcat
+ * instead.  */
+/* #define REDIRECT_SYSLOG_TO_ANDROID_LOGCAT */
+#ifdef REDIRECT_SYSLOG_TO_ANDROID_LOGCAT
+
+#define LOG_TAG "DHCPCD"
+#include <utils/Log.h>
+
+#undef LOG_EMERG
+#undef LOG_ALERT
+#undef LOG_CRIT
+#undef LOG_ERR
+#undef LOG_WARNING
+#undef LOG_NOTICE
+#undef LOG_INFO
+#undef LOG_DEBUG
+
+#define LOG_EMERG   ANDROID_LOG_FATAL
+#define LOG_ALERT   ANDROID_LOG_FATAL
+#define LOG_CRIT    ANDROID_LOG_FATAL
+#define LOG_ERR     ANDROID_LOG_ERROR
+#define LOG_WARNING ANDROID_LOG_WARN
+#define LOG_NOTICE  ANDROID_LOG_WARN
+#define LOG_INFO    ANDROID_LOG_INFO
+#define LOG_DEBUG   ANDROID_LOG_DEBUG
+#define syslog(a, b...) android_printLog(a, LOG_TAG, b)
+
+#endif  /* REDIRECT_SYSLOG_TO_ANDROID_LOGCAT */
+
 #endif
