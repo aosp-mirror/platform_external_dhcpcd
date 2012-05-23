@@ -3,25 +3,32 @@
 # know that setting up the interface is complete.
 
 # For debugging:
-setprop dhcp.${interface}.reason "${reason}"
+
+if [[ $interface == p2p* ]]
+    then
+    intf=p2p
+    else
+    intf=$interface
+fi
+setprop dhcp.${intf}.reason "${reason}"
 
 case "${reason}" in
 BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT)
-    setprop dhcp.${interface}.ipaddress  "${new_ip_address}"
-    setprop dhcp.${interface}.gateway    "${new_routers%% *}"
-    setprop dhcp.${interface}.mask       "${new_subnet_mask}"
-    setprop dhcp.${interface}.leasetime  "${new_dhcp_lease_time}"
-    setprop dhcp.${interface}.server     "${new_dhcp_server_identifier}"
-    setprop dhcp.${interface}.vendorInfo "${new_vendor_encapsulated_options}"
+    setprop dhcp.${intf}.ipaddress  "${new_ip_address}"
+    setprop dhcp.${intf}.gateway    "${new_routers%% *}"
+    setprop dhcp.${intf}.mask       "${new_subnet_mask}"
+    setprop dhcp.${intf}.leasetime  "${new_dhcp_lease_time}"
+    setprop dhcp.${intf}.server     "${new_dhcp_server_identifier}"
+    setprop dhcp.${intf}.vendorInfo "${new_vendor_encapsulated_options}"
 
-    setprop dhcp.${interface}.result "ok"
+    setprop dhcp.${intf}.result "ok"
     ;;
 
 EXPIRE|FAIL|IPV4LL|STOP)
-    setprop dhcp.${interface}.result "failed"
+    setprop dhcp.${intf}.result "failed"
     ;;
 
 RELEASE)
-    setprop dhcp.${interface}.result "released"
+    setprop dhcp.${intf}.result "released"
     ;;
 esac

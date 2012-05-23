@@ -1751,6 +1751,8 @@ main(int argc, char **argv)
 	struct timespec ts;
 
 #ifdef ANDROID
+	/* Reuse system properties for a p2p interface */
+	char p2p_interface[PROPERTY_KEY_MAX];
 	switchUser();
 #endif
 	closefrom(3);
@@ -1915,9 +1917,15 @@ main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 
+		if (strncmp(argv[optind], "p2p", 3) == 0) {
+			strncpy(p2p_interface, "p2p", sizeof(p2p_interface));
+		} else {
+			strncpy(p2p_interface, argv[optind], sizeof(p2p_interface));
+		}
+
 		if (snprintf(pidpropname,
 			     sizeof(pidpropname),
-			     "dhcp.%s.pid", argv[optind]) >= PROPERTY_KEY_MAX)
+			     "dhcp.%s.pid", p2p_interface) >= PROPERTY_KEY_MAX)
 			exit(EXIT_FAILURE);
 		property_get(pidpropname, pidpropval, NULL);
 		if (strlen(pidpropval) == 0)
@@ -2000,9 +2008,15 @@ main(int argc, char **argv)
 			exit(EXIT_FAILURE);
 		}
 
+		if (strncmp(argv[optind], "p2p", 3) == 0) {
+			strncpy(p2p_interface, "p2p", sizeof(p2p_interface));
+		} else {
+			strncpy(p2p_interface, argv[optind], sizeof(p2p_interface));
+		}
+
 		if (snprintf(pidpropname,
 			     sizeof(pidpropname),
-			     "dhcp.%s.pid", argv[optind]) >= PROPERTY_KEY_MAX)
+			     "dhcp.%s.pid", p2p_interface) >= PROPERTY_KEY_MAX)
 			exit(EXIT_FAILURE);
 		if (snprintf(pidpropval, sizeof(pidpropval), "%d", getpid()) >= PROPERTY_VALUE_MAX)
 			exit(EXIT_FAILURE);
