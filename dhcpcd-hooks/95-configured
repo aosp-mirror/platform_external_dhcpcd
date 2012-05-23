@@ -2,14 +2,14 @@
 # has completed. It sets a property to let the framework
 # know that setting up the interface is complete.
 
-# For debugging:
-
 if [[ $interface == p2p* ]]
     then
     intf=p2p
     else
     intf=$interface
 fi
+
+# For debugging:
 setprop dhcp.${intf}.reason "${reason}"
 
 case "${reason}" in
