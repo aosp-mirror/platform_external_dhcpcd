@@ -9,7 +9,7 @@ include $(CLEAR_VARS)
 LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
 	eloop.c if-options.c if-pref.c ipv4ll.c net.c signals.c configure.c \
 	if-linux.c if-linux-wireless.c lpf.c compat/getline.c \
-	platform-linux.c compat/closefrom.c ifaddrs.c
+	platform-linux.c compat/closefrom.c ifaddrs.c ipv6rs.c
 
 #LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils

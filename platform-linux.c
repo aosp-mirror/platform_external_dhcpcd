@@ -1,6 +1,6 @@
 /* 
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2010 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2012 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -27,7 +27,9 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 
 #include "common.h"
 #include "platform.h"
@@ -101,4 +103,51 @@ hardware_platform(void)
 	if (p == NULL)
 		errno = ESRCH;
 	return p;
+}
+
+static int
+check_proc_int(const char *path)
+{
+	FILE *fp;
+	char *buf;
+
+	fp = fopen(path, "r");
+	if (fp == NULL)
+		return -1;
+	buf = get_line(fp);
+	fclose(fp);
+	if (buf == NULL)
+		return -1;
+	return atoi(buf);
+}
+
+static const char *prefix = "/proc/sys/net/ipv6/conf";
+
+int
+check_ipv6(const char *ifname)
+{
+	int r;
+	char path[256];
+
+	if (ifname == NULL)
+		ifname = "all";
+
+	snprintf(path, sizeof(path), "%s/%s/accept_ra", prefix, ifname);
+	r = check_proc_int(path);
+	if (r != 1 && r != 2) {
+		syslog(LOG_WARNING,
+		    "%s: not configured to accept IPv6 RAs", ifname);
+		return 0;
+	}
+
+	if (r != 2) {
+		snprintf(path, sizeof(path), "%s/%s/forwarding",
+		    prefix, ifname);
+		if (check_proc_int(path) != 0) {
+			syslog(LOG_WARNING,
+			    "%s: configured as a router, not a host", ifname);
+			return 0;
+		}
+	}
+	return 1;
 }

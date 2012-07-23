@@ -1,6 +1,6 @@
 /* 
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2008 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -119,7 +119,7 @@ handle_arp_packet(void *arg)
 	state->fail.s_addr = 0;
 	for(;;) {
 		bytes = get_raw_packet(iface, ETHERTYPE_ARP,
-		    arp_buffer, sizeof(arp_buffer));
+		    arp_buffer, sizeof(arp_buffer), NULL);
 		if (bytes == 0 || bytes == -1)
 			return;
 		/* We must have a full ARP header */
@@ -204,6 +204,8 @@ send_arp_announce(void *arg)
 	struct if_state *state = iface->state;
 	struct timeval tv;
 
+	if (state->new == NULL)
+		return;
 	if (iface->arp_fd == -1) {
 		open_socket(iface, ETHERTYPE_ARP);
 		add_event(iface->arp_fd, handle_arp_packet, iface);

@@ -1,6 +1,6 @@
 /* 
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2012 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -25,10 +25,16 @@
  * SUCH DAMAGE.
  */
 
-#ifndef PLATFORM_H
-#define PLATFORM_H
+#ifndef IPV6RS_H
+#define IPV6RS_H
 
-char *hardware_platform(void);
-int check_ipv6(const char *);
-
+#ifndef ICMP6_FILTER
+#define ICMP6_FILTER	1
+#endif
+int ipv6rs_open(void);
+void ipv6rs_handledata(void *);
+int ipv6rs_start(struct interface *);
+ssize_t ipv6rs_env(char **, const char *, const struct interface *);
+void ipv6rs_free(struct interface *ifp);
+void ipv6rs_expire(void *arg);
 #endif

@@ -1,6 +1,6 @@
 /* 
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2010 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -66,12 +66,28 @@
 #include "common.h"
 #include "dhcp.h"
 #include "if-options.h"
+#include "ipv6rs.h"
 #include "net.h"
 #include "signals.h"
 
 static char hwaddr_buffer[(HWADDR_LEN * 3) + 1];
 
 int socket_afnet = -1;
+
+#if defined(__FreeBSD__) && defined(DEBUG_MEMORY)
+/* FreeBSD does not zero the struct, causing valgrind errors */
+unsigned int
+if_nametoindex(const char *ifname)
+{
+	struct ifreq ifr;
+
+	memset(&ifr, 0, sizeof(ifr));
+	strlcpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name));
+	if (ioctl(socket_afnet, SIOCGIFINDEX, &ifr) != -1)
+		return ifr.ifr_index;
+	return 0;
+}
+#endif
 
 int
 inet_ntocidr(struct in_addr address)
@@ -233,6 +249,7 @@ free_interface(struct interface *iface)
 {
 	if (!iface)
 		return;
+	ipv6rs_free(iface);
 	if (iface->state) {
 		free_options(iface->state->options);
 		free(iface->state->old);
@@ -240,6 +257,7 @@ free_interface(struct interface *iface)
 		free(iface->state->offer);
 		free(iface->state);
 	}
+	free(iface->buffer);
 	free(iface->clientid);
 	free(iface);
 }
@@ -315,7 +333,7 @@ discover_interfaces(int argc, char * const *argv)
 {
 	struct ifaddrs *ifaddrs, *ifa;
 	char *p;
-	int i;
+	int i, sdl_type;
 	struct interface *ifp, *ifs, *ifl;
 #ifdef __linux__
 	char ifn[IF_NAMESIZE];
@@ -409,6 +427,7 @@ discover_interfaces(int argc, char * const *argv)
 				syslog(LOG_ERR, "%s: up_interface: %m", ifp->name);
 		}
 
+		sdl_type = 0;
 		/* Don't allow loopback unless explicit */
 		if (ifp->flags & IFF_LOOPBACK) {
 			if (argc == 0 && ifac == 0) {
@@ -435,13 +454,22 @@ discover_interfaces(int argc, char * const *argv)
 			}
 #endif
 
+			sdl_type = sdl->sdl_type;
 			switch(sdl->sdl_type) {
+			case IFT_BRIDGE: /* FALLTHROUGH */
+			case IFT_L2VLAN: /* FALLTHOUGH */
+			case IFT_L3IPVLAN: /* FALLTHROUGH */
 			case IFT_ETHER:
 				ifp->family = ARPHRD_ETHER;
 				break;
 			case IFT_IEEE1394:
 				ifp->family = ARPHRD_IEEE1394;
 				break;
+#ifdef IFT_INFINIBAND
+			case IFT_INFINIBAND:
+				ifp->family = ARPHRD_INFINIBAND;
+				break;
+#endif
 			}
 			ifp->hwlen = sdl->sdl_alen;
 #ifndef CLLADDR
@@ -450,7 +478,7 @@ discover_interfaces(int argc, char * const *argv)
 			memcpy(ifp->hwaddr, CLLADDR(sdl), ifp->hwlen);
 #elif AF_PACKET
 			sll = (const struct sockaddr_ll *)(void *)ifa->ifa_addr;
-			ifp->family = sll->sll_hatype;
+			ifp->family = sdl_type = sll->sll_hatype;
 			ifp->hwlen = sll->sll_halen;
 			if (ifp->hwlen != 0)
 				memcpy(ifp->hwaddr, sll->sll_addr, ifp->hwlen);
@@ -472,7 +500,11 @@ discover_interfaces(int argc, char * const *argv)
 				break;
 			default:
 				syslog(LOG_WARNING,
-				    "%s: unknown hardware family", p);
+				    "%s: unsupported interface type %.2x"
+				    ", falling back to ethernet",
+				    ifp->name, sdl_type);
+				ifp->family = ARPHRD_ETHER;
+				break;
 			}
 		}
 
@@ -727,7 +759,8 @@ get_udp_data(const uint8_t **data, const uint8_t *udp)
 }
 
 int
-valid_udp_packet(const uint8_t *data, size_t data_len, struct in_addr *from)
+valid_udp_packet(const uint8_t *data, size_t data_len, struct in_addr *from,
+    int noudpcsum)
 {
 	struct udp_dhcp_packet packet;
 	uint16_t bytes, udpsum;
@@ -755,19 +788,22 @@ valid_udp_packet(const uint8_t *data, size_t data_len, struct in_addr *from)
 		errno = EINVAL;
 		return -1;
 	}
-	udpsum = packet.udp.uh_sum;
-	packet.udp.uh_sum = 0;
-	packet.ip.ip_hl = 0;
-	packet.ip.ip_v = 0;
-	packet.ip.ip_tos = 0;
-	packet.ip.ip_len = packet.udp.uh_ulen;
-	packet.ip.ip_id = 0;
-	packet.ip.ip_off = 0;
-	packet.ip.ip_ttl = 0;
-	packet.ip.ip_sum = 0;
-	if (udpsum && checksum(&packet, bytes) != udpsum) {
-		errno = EINVAL;
-		return -1;
+
+	if (noudpcsum == 0) {
+		udpsum = packet.udp.uh_sum;
+		packet.udp.uh_sum = 0;
+		packet.ip.ip_hl = 0;
+		packet.ip.ip_v = 0;
+		packet.ip.ip_tos = 0;
+		packet.ip.ip_len = packet.udp.uh_ulen;
+		packet.ip.ip_id = 0;
+		packet.ip.ip_off = 0;
+		packet.ip.ip_ttl = 0;
+		packet.ip.ip_sum = 0;
+		if (udpsum && checksum(&packet, bytes) != udpsum) {
+			errno = EINVAL;
+			return -1;
+		}
 	}
 
 	return 0;

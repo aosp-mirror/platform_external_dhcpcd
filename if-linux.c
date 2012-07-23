@@ -1,6 +1,6 @@
 /* 
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2010 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -38,6 +38,13 @@
 /* Support older kernels */
 #ifndef IFLA_WIRELESS
 # define IFLA_WIRELESS (IFLA_MASTER + 1)
+#endif
+
+/* For some reason, glibc doesn't include newer flags from linux/if.h
+ * However, we cannot include linux/if.h directly as it conflicts
+ * with the glibc version. D'oh! */
+#ifndef IFF_LOWER_UP
+#define IFF_LOWER_UP	0x10000		/* driver signals L1 up		*/
 #endif
 
 #include <errno.h>
@@ -371,11 +378,23 @@ link_netlink(struct nlmsghdr *nlm)
 		}
 		rta = RTA_NEXT(rta, len);
 	}
-	if (nlm->nlmsg_type == RTM_NEWLINK)
-		len = ifi->ifi_change == ~0U ? 1 : 0;
-	else
-		len = -1;
-	handle_interface(len, ifn);
+
+	if (nlm->nlmsg_type == RTM_DELLINK) {
+		handle_interface(-1, ifn);
+		return 1;
+	}
+
+	/* Bridge interfaces set IFF_LOWER_UP when they have a valid
+	 * hardware address. To trigger a valid hardware address pickup
+	 * we need to pretend that that don't exist until they have
+	 * IFF_LOWER_UP set. */
+	if (ifi->ifi_flags & IFF_MASTER && !(ifi->ifi_flags & IFF_LOWER_UP)) {
+		handle_interface(-1, ifn);
+		return 1;
+	}
+
+	handle_carrier(ifi->ifi_flags & IFF_RUNNING ? 1 : -1,
+	    ifi->ifi_flags, ifn);
 	return 1;
 }
 
@@ -509,15 +528,13 @@ if_address(const struct interface *iface,
 }
 
 int
-if_route(const struct interface *iface,
-    const struct in_addr *destination, const struct in_addr *netmask,
-    const struct in_addr *gateway, int metric, int action)
+if_route(const struct rt *rt, int action)
 {
 	struct nlmr *nlm;
 	unsigned int ifindex;
 	int retval = 0;
 
-	if (!(ifindex = if_nametoindex(iface->name))) {
+	if (!(ifindex = if_nametoindex(rt->iface->name))) {
 		errno = ENODEV;
 		return -1;
 	}
@@ -540,36 +557,36 @@ if_route(const struct interface *iface,
 	else {
 		nlm->hdr.nlmsg_flags |= NLM_F_CREATE /*| NLM_F_EXCL*/;
 		/* We only change route metrics for kernel routes */
-		if (destination->s_addr ==
-		    (iface->addr.s_addr & iface->net.s_addr) &&
-		    netmask->s_addr == iface->net.s_addr)
+		if (rt->dest.s_addr ==
+		    (rt->iface->addr.s_addr & rt->iface->net.s_addr) &&
+		    rt->net.s_addr == rt->iface->net.s_addr)
 			nlm->rt.rtm_protocol = RTPROT_KERNEL;
 		else
 			nlm->rt.rtm_protocol = RTPROT_BOOT;
-		if (gateway->s_addr == INADDR_ANY ||
-		    (gateway->s_addr == destination->s_addr &&
-			netmask->s_addr == INADDR_BROADCAST))
+		if (rt->gate.s_addr == INADDR_ANY ||
+		    (rt->gate.s_addr == rt->dest.s_addr &&
+			rt->net.s_addr == INADDR_BROADCAST))
 			nlm->rt.rtm_scope = RT_SCOPE_LINK;
 		else
 			nlm->rt.rtm_scope = RT_SCOPE_UNIVERSE;
 		nlm->rt.rtm_type = RTN_UNICAST;
 	}
 
-	nlm->rt.rtm_dst_len = inet_ntocidr(*netmask);
+	nlm->rt.rtm_dst_len = inet_ntocidr(rt->net);
 	add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_DST,
-	    &destination->s_addr, sizeof(destination->s_addr));
+	    &rt->dest.s_addr, sizeof(rt->dest.s_addr));
 	if (nlm->rt.rtm_protocol == RTPROT_KERNEL) {
 		add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_PREFSRC,
-		    &iface->addr.s_addr, sizeof(iface->addr.s_addr));
+		    &rt->iface->addr.s_addr, sizeof(rt->iface->addr.s_addr));
 	}
 	/* If destination == gateway then don't add the gateway */
-	if (destination->s_addr != gateway->s_addr ||
-	    netmask->s_addr != INADDR_BROADCAST)
+	if (rt->dest.s_addr != rt->gate.s_addr ||
+	    rt->net.s_addr != INADDR_BROADCAST)
 		add_attr_l(&nlm->hdr, sizeof(*nlm), RTA_GATEWAY,
-		    &gateway->s_addr, sizeof(gateway->s_addr));
+		    &rt->gate.s_addr, sizeof(rt->gate.s_addr));
 
 	add_attr_32(&nlm->hdr, sizeof(*nlm), RTA_OIF, ifindex);
-	add_attr_32(&nlm->hdr, sizeof(*nlm), RTA_PRIORITY, metric);
+	add_attr_32(&nlm->hdr, sizeof(*nlm), RTA_PRIORITY, rt->metric);
 
 	if (send_netlink(&nlm->hdr) == -1)
 		retval = -1;
