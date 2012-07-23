@@ -32,14 +32,15 @@
 
 struct ifaddrs *get_interface(const char *name, sa_family_t family)
 {
-    unsigned addr, mask, flags;
+    unsigned addr, flags;
+    int masklen;
     struct ifaddrs *ifa;
     struct sockaddr_in *saddr = NULL;
     struct sockaddr_in *smask = NULL;
     struct sockaddr_ll *hwaddr = NULL;
     unsigned char hwbuf[ETH_ALEN];
 
-    if(ifc_get_info(name, &addr, &mask, &flags))
+    if (ifc_get_info(name, &addr, &masklen, &flags))
         return NULL;
 
     if ((family == AF_INET) && (addr == 0))
@@ -66,10 +67,10 @@ struct ifaddrs *get_interface(const char *name, sa_family_t family)
         }
         ifa->ifa_addr = (struct sockaddr *)saddr;
 
-        if (mask != 0) {
+        if (masklen != 0) {
             smask = malloc(sizeof(struct sockaddr_in));
             if (smask) {
-                smask->sin_addr.s_addr = mask;
+                smask->sin_addr.s_addr = prefixLengthToIpv4Netmask(masklen);
                 smask->sin_family = family;
             }
         }
