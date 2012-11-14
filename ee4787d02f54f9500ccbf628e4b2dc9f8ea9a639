@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "AAALin///pA\u003d",
+        "filename": "dhcpcd-hooks/20-dns.conf",
+        "patchSetId": 1
+      },
+      "lineNbr": 28,
+      "author": {
+        "id": 1002609
+      },
+      "writtenOn": "2012-11-14T01:48:13Z",
+      "side": 1,
+      "message": "you need quotes: \"${new_domain_name}\" else when you go from a domain\u0027d network to one without you keep the previous domain.  Note that unset_dns_props never seems to be called.",
+      "revId": "ee4787d02f54f9500ccbf628e4b2dc9f8ea9a639",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}
