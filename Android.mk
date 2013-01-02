@@ -14,7 +14,6 @@ LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
 #LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils
 LOCAL_MODULE = dhcpcd
-LOCAL_CFLAGS := -D_POSIX_MONOTONIC_CLOCK -DCLOCK_MONOTONIC
 include $(BUILD_EXECUTABLE)
 
 include $(CLEAR_VARS)
