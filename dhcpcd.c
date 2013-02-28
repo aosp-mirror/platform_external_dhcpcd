@@ -73,7 +73,7 @@ const char copyright[] = "Copyright (c) 2006-2012 Roy Marples";
 #include "signals.h"
 
 #ifdef ANDROID
-#include <linux/capability.h>
+#include <sys/capability.h>
 #include <linux/prctl.h>
 #include <cutils/properties.h>
 #include <private/android_filesystem_config.h>
