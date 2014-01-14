@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2013 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -28,13 +28,75 @@
 #ifndef IPV6RS_H
 #define IPV6RS_H
 
+#include <sys/queue.h>
+
+#include <time.h>
+
+#include "dhcpcd.h"
+#include "ipv6.h"
+
 #ifndef ICMP6_FILTER
-#define ICMP6_FILTER	1
+#define ICMP6_FILTER 1
 #endif
-int ipv6rs_open(void);
-void ipv6rs_handledata(void *);
+
+struct ra_opt {
+	TAILQ_ENTRY(ra_opt) next;
+	uint8_t type;
+	struct timeval expire;
+	char *option;
+};
+
+struct ra {
+	TAILQ_ENTRY(ra) next;
+	struct interface *iface;
+	struct in6_addr from;
+	char sfrom[INET6_ADDRSTRLEN];
+	unsigned char *data;
+	ssize_t data_len;
+	struct timeval received;
+	unsigned char flags;
+	uint32_t lifetime;
+	uint32_t reachable;
+	uint32_t retrans;
+	uint32_t mtu;
+	struct ipv6_addrhead addrs;
+	TAILQ_HEAD(, ra_opt) options;
+
+	unsigned char *ns;
+	size_t nslen;
+	int nsprobes;
+
+	int expired;
+};
+
+extern TAILQ_HEAD(rahead, ra) ipv6_routers;
+
+struct rs_state {
+	unsigned char *rs;
+	size_t rslen;
+	int rsprobes;
+};
+
+#define RS_STATE(a) ((struct rs_state *)(ifp)->if_data[IF_DATA_IPV6RS])
+
+#ifdef INET6
 int ipv6rs_start(struct interface *);
 ssize_t ipv6rs_env(char **, const char *, const struct interface *);
-void ipv6rs_free(struct interface *ifp);
+const struct ipv6_addr * ipv6rs_findprefix(const struct ipv6_addr *);
+int ipv6rs_addrexists(const struct ipv6_addr *);
+void ipv6rs_freedrop_ra(struct ra *, int);
+#define ipv6rs_free_ra(ra) ipv6rs_freedrop_ra((ra),  0)
+#define ipv6rs_drop_ra(ra) ipv6rs_freedrop_ra((ra),  1)
+ssize_t ipv6rs_free(struct interface *);
 void ipv6rs_expire(void *arg);
+int ipv6rs_has_ra(const struct interface *);
+void ipv6rs_handleifa(int, const char *, const struct in6_addr *, int);
+void ipv6rs_drop(struct interface *);
+#else
+#define ipv6rs_start(a) {}
+#define ipv6rs_free(a)
+#define ipv6rs_has_ra(a) 0
+#define ipv6rs_drop(a)
+#endif
+
 #endif

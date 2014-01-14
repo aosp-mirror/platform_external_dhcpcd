@@ -1,5 +1,5 @@
 dhcpcd - DHCP client daemon
-Copyright (c) 2006-2012 Roy Marples <roy@marples.name>
+Copyright (c) 2006-2013 Roy Marples <roy@marples.name>
 
 
 Installation
@@ -54,8 +54,8 @@ the binary has to run on older versions which lack support, such as getline.
 Hooks
 -----
 Not all the hooks in dhcpcd-hooks are installed by default.
-By default we install 01-test, 10-mtu, 20-resolv.conf,
-29-lookup-hostname and 30-hostname.
+By default we install 01-test, 02-dump, 10-mtu, 10-wpa_supplicant,
+15-timezone, 20-resolv.conf, 29-lookup-hostname and 30-hostname.
 The default dhcpcd.conf disables the lookup-hostname hook by default.
 The configure program attempts to find hooks for systems you have installed.
 To add more simply
@@ -66,11 +66,6 @@ Compatibility
 -------------
 dhcpcd-5.0 is only fully command line compatible with dhcpcd-4.0
 For compatibility with older versions, use dhcpcd-4.0
-
-dhcpcd no longer sends a default ClientID for ethernet interfaces.
-This is so we can re-use the address the kernel DHCP client found.
-To retain the old behaviour of sending a default ClientID based on the
-hardware address for interface, simply add the keyword clientid to dhcpcd.conf.
 
 
 ChangeLog
