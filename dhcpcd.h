@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2013 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -28,88 +28,31 @@
 #ifndef DHCPCD_H
 #define DHCPCD_H
 
+#include <sys/queue.h>
 #include <sys/socket.h>
 #include <net/if.h>
-#include <netinet/in.h>
-
-#include <limits.h>
 
 #include "control.h"
-#include "dhcp.h"
 #include "if-options.h"
 
 #define HWADDR_LEN 20
 #define IF_SSIDSIZE 33
 #define PROFILE_LEN 64
 
-enum DHS {
-	DHS_INIT,
-	DHS_DISCOVER,
-	DHS_REQUEST,
-	DHS_BOUND,
-	DHS_RENEW,
-	DHS_REBIND,
-	DHS_REBOOT,
-	DHS_INFORM,
-	DHS_RENEW_REQUESTED,
-	DHS_INIT_IPV4LL,
-	DHS_PROBE
-};
-
-#define LINK_UP 	1
+#define LINK_UP		1
 #define LINK_UNKNOWN	0
-#define LINK_DOWN 	-1
+#define LINK_DOWN	-1
 
-struct if_state {
-	enum DHS state;
-	char profile[PROFILE_LEN];
-	struct if_options *options;
-	struct dhcp_message *sent;
-	struct dhcp_message *offer;
-	struct dhcp_message *new;
-	struct dhcp_message *old;
-	struct dhcp_lease lease;
-	const char *reason;
-	time_t interval;
-	time_t nakoff;
-	uint32_t xid;
-	int socket;
-	int probes;
-	int claims;
-	int conflicts;
-	time_t defend;
-	struct in_addr fail;
-	size_t arping_index;
-};
-
-struct ra_opt {
-	uint8_t type;
-	struct timeval expire;
-	char *option;
-	struct ra_opt *next;
-};
-
-struct ra {
-	struct in6_addr from;
-	char sfrom[INET6_ADDRSTRLEN];
-	unsigned char *data;
-	ssize_t data_len;
-	struct timeval received;
-	uint32_t lifetime;
-	struct in6_addr prefix;
-	int prefix_len;
-	uint32_t prefix_vltime;
-	uint32_t prefix_pltime;
-	char sprefix[INET6_ADDRSTRLEN];
-	struct ra_opt *options;
-	int expired;
-	struct ra *next;
-};
+#define IF_DATA_DHCP	0
+#define IF_DATA_IPV6	1
+#define IF_DATA_IPV6RS	2
+#define IF_DATA_DHCP6	3
+#define IF_DATA_MAX	4
 
 struct interface {
+	TAILQ_ENTRY(interface) next;
 	char name[IF_NAMESIZE];
-	struct if_state *state;
-
+	unsigned int index;
 	int flags;
 	sa_family_t family;
 	unsigned char hwaddr[HWADDR_LEN];
@@ -119,58 +62,32 @@ struct interface {
 	int wireless;
 	char ssid[IF_SSIDSIZE];
 
-	int raw_fd;
-	int udp_fd;
-	int arp_fd;
-	size_t buffer_size, buffer_len, buffer_pos;
-	unsigned char *buffer;
-
-	struct in_addr addr;
-	struct in_addr net;
-	struct in_addr dst;
-
-	char leasefile[PATH_MAX];
-	time_t start_uptime;
-
-	unsigned char *clientid;
-
-	unsigned char *rs;
-	size_t rslen;
-	int rsprobes;
-	struct ra *ras;
-
-	struct interface *next;
+	char profile[PROFILE_LEN];
+	struct if_options *options;
+	void *if_data[IF_DATA_MAX];
 };
+extern TAILQ_HEAD(if_head, interface) *ifaces;
 
+extern char vendor[VENDORCLASSID_MAX_LEN];
+extern sigset_t dhcpcd_sigset;
 extern int pidfd;
-extern unsigned long long options;
 extern int ifac;
 extern char **ifav;
 extern int ifdc;
 extern char **ifdv;
-extern struct interface *ifaces;
-extern int avoid_routes;
+extern struct if_options *if_options;
 
+extern const int handle_sigs[];
+
+pid_t daemonise(void);
 struct interface *find_interface(const char *);
 int handle_args(struct fd_list *, int, char **);
 void handle_carrier(int, int, const char *);
 void handle_interface(int, const char *);
-void handle_hwaddr(const char *, unsigned char *, size_t);
-void handle_ifa(int, const char *,
-    struct in_addr *, struct in_addr *, struct in_addr *);
-void handle_exit_timeout(void *);
-void start_interface(void *);
-void start_discover(void *);
-void start_request(void *);
-void start_renew(void *);
-void start_rebind(void *);
-void start_reboot(struct interface *);
-void start_expire(void *);
-void send_decline(struct interface *);
-void open_sockets(struct interface *);
-void close_sockets(struct interface *);
-void drop_dhcp(struct interface *, const char *);
+void handle_hwaddr(const char *, const unsigned char *, size_t);
 void drop_interface(struct interface *, const char *);
 int select_profile(struct interface *, const char *);
+
+void start_interface(void *);
 
 #endif

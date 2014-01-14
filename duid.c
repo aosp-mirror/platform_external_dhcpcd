@@ -1,4 +1,4 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
  * Copyright (c) 2006-2008 Roy Marples <roy@marples.name>
  * All rights reserved
@@ -25,31 +25,69 @@
  * SUCH DAMAGE.
  */
 
-#define THIRTY_YEARS_IN_SECONDS    946707779
+#define DUID_TIME_EPOCH 946684800
+#define DUID_LLT	1
+#define DUID_LL		3
+
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#include <net/if.h>
+#include <net/if_arp.h>
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef ARPHRD_NETROM
+#  define ARPHRD_NETROM	0
+#endif
 
 #include "common.h"
 #include "duid.h"
 #include "net.h"
 
+static size_t
+make_duid(unsigned char *duid, const struct interface *ifp, uint16_t type)
+{
+	unsigned char *p;
+	uint16_t u16;
+	time_t t;
+	uint32_t u32;
+
+	p = duid;
+	u16 = htons(type);
+	memcpy(p, &u16, 2);
+	p += 2;
+	u16 = htons(ifp->family);
+	memcpy(p, &u16, 2);
+	p += 2;
+	if (type == DUID_LLT) {
+		/* time returns seconds from jan 1 1970, but DUID-LLT is
+		 * seconds from jan 1 2000 modulo 2^32 */
+		t = time(NULL) - DUID_TIME_EPOCH;
+		u32 = htonl(t & 0xffffffff);
+		memcpy(p, &u32, 4);
+		p += 4;
+	}
+	/* Finally, add the MAC address of the interface */
+	memcpy(p, ifp->hwaddr, ifp->hwlen);
+	p += ifp->hwlen;
+	return p - duid;
+}
+
 size_t
 get_duid(unsigned char *duid, const struct interface *iface)
 {
 	FILE *f;
-	uint16_t type = 0;
-	uint16_t hw = 0;
-	uint32_t ul;
-	time_t t;
 	int x = 0;
-	unsigned char *p = duid;
 	size_t len = 0;
 	char *line;
+	const struct interface *ifp;
 
 	/* If we already have a DUID then use it as it's never supposed
 	 * to change once we have one even if the interfaces do */
@@ -67,34 +105,41 @@ get_duid(unsigned char *duid, const struct interface *iface)
 			return len;
 	} else {
 		if (errno != ENOENT)
-			return 0;
+			syslog(LOG_ERR, "error reading DUID: %s: %m", DUID);
 	}
 
 	/* No file? OK, lets make one based on our interface */
-	if (!(f = fopen(DUID, "w")))
-		return 0;
-	type = htons(1); /* DUI-D-LLT */
-	memcpy(p, &type, 2);
-	p += 2;
-	hw = htons(iface->family);
-	memcpy(p, &hw, 2);
-	p += 2;
-	/* time returns seconds from jan 1 1970, but DUID-LLT is
-	 * seconds from jan 1 2000 modulo 2^32 */
-	t = time(NULL) - THIRTY_YEARS_IN_SECONDS;
-	ul = htonl(t & 0xffffffff);
-	memcpy(p, &ul, 4);
-	p += 4;
-	/* Finally, add the MAC address of the interface */
-	memcpy(p, iface->hwaddr, iface->hwlen);
-	p += iface->hwlen;
-	len = p - duid;
+	if (iface->family == ARPHRD_NETROM) {
+		syslog(LOG_WARNING, "%s: is a NET/ROM psuedo interface",
+		    iface->name);
+		TAILQ_FOREACH(ifp, ifaces, next) {
+			if (ifp->family != ARPHRD_NETROM)
+				break;
+		}
+		if (ifp) {
+			iface = ifp;
+			syslog(LOG_WARNING,
+			    "picked interface %s to generate a DUID",
+			    iface->name);
+		} else {
+			syslog(LOG_WARNING,
+			    "no interfaces have a fixed hardware address");
+			return make_duid(duid, iface, DUID_LL);
+		}
+	}
+
+	if (!(f = fopen(DUID, "w"))) {
+		syslog(LOG_ERR, "error writing DUID: %s: %m", DUID);
+		return make_duid(duid, iface, DUID_LL);
+	}
+	len = make_duid(duid, iface, DUID_LLT);
 	x = fprintf(f, "%s\n", hwaddr_ntoa(duid, len));
 	fclose(f);
 	/* Failed to write the duid? scrub it, we cannot use it */
 	if (x < 1) {
-		len = 0;
+		syslog(LOG_ERR, "error writing DUID: %s: %m", DUID);
 		unlink(DUID);
+		return make_duid(duid, iface, DUID_LL);
 	}
 	return len;
 }

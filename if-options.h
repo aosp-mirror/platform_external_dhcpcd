@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2012 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2013 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -28,21 +28,27 @@
 #ifndef IF_OPTIONS_H
 #define IF_OPTIONS_H
 
+#include <arpa/inet.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <netinet/in.h>
 
 #include <getopt.h>
 #include <limits.h>
+#include <stdint.h>
+
+#include "ipv4.h"
 
 /* Don't set any optional arguments here so we retain POSIX
  * compatibility with getopt */
-#define IF_OPTS "abc:de:f:gh:i:kl:m:no:pqr:s:t:u:v:wxy:z:ABC:DEF:GHI:JKLO:Q:S:TUVW:X:Z:"
+#define IF_OPTS "46bc:de:f:gh:i:kl:m:no:pqr:s:t:u:v:wxy:z:ABC:DEF:GHI:JKLO:Q:S:TUVW:X:Z:"
 
 #define DEFAULT_TIMEOUT		30
 #define DEFAULT_REBOOT		5
 
+#ifndef HOSTNAME_MAX_LEN
 #define HOSTNAME_MAX_LEN	250	/* 255 - 3 (FQDN) - 2 (DNS enc) */
+#endif
 #define VENDORCLASSID_MAX_LEN	255
 #define CLIENTID_MAX_LEN	48
 #define USERCLASS_MAX_LEN	255
@@ -67,7 +73,7 @@
 #define DHCPCD_HOSTNAME			(1ULL << 18)
 #define DHCPCD_CLIENTID			(1ULL << 19)
 #define DHCPCD_LINK			(1ULL << 20)
-#define DHCPCD_QUIET			(1ULL << 21) 
+#define DHCPCD_QUIET			(1ULL << 21)
 #define DHCPCD_BACKGROUND		(1ULL << 22)
 #define DHCPCD_VENDORRAW		(1ULL << 23)
 #define DHCPCD_TIMEOUT_IPV4LL		(1ULL << 24)
@@ -79,14 +85,41 @@
 #define DHCPCD_DUMPLEASE		(1ULL << 30)
 #define DHCPCD_IPV6RS			(1ULL << 31)
 #define DHCPCD_IPV6RA_REQRDNSS		(1ULL << 32)
+#define DHCPCD_IPV6RA_OWN		(1ULL << 33)
+#define DHCPCD_IPV6RA_OWN_DEFAULT	(1ULL << 34)
+#define DHCPCD_IPV4			(1ULL << 35)
+#define DHCPCD_FORKED			(1ULL << 36)
+#define DHCPCD_IPV6			(1ULL << 37)
+#define DHCPCD_STARTED			(1ULL << 38)
+#define DHCPCD_NOALIAS			(1ULL << 39)
+#define DHCPCD_IA_FORCED		(1ULL << 40)
+#define DHCPCD_STOPPING			(1ULL << 41)
+#define DHCPCD_DEPARTED			(1ULL << 42)
+#define DHCPCD_HOSTNAME_SHORT		(1ULL << 43)
 
 extern const struct option cf_options[];
+
+struct if_sla {
+	char ifname[IF_NAMESIZE];
+	uint32_t sla;
+	short prefix_len;
+	int8_t sla_set;
+};
+
+struct if_iaid {
+	uint8_t iaid[4];
+	size_t sla_len;
+	struct if_sla *sla;
+};
 
 struct if_options {
 	int metric;
 	uint8_t requestmask[256 / 8];
 	uint8_t requiremask[256 / 8];
 	uint8_t nomask[256 / 8];
+	uint8_t requestmask6[(UINT16_MAX + 1) / 8];
+	uint8_t requiremask6[(UINT16_MAX + 1) / 8];
+	uint8_t nomask6[(UINT16_MAX + 1) / 8];
 	uint8_t dstmask[256 / 8];
 	uint32_t leasetime;
 	time_t timeout;
@@ -95,12 +128,12 @@ struct if_options {
 
 	struct in_addr req_addr;
 	struct in_addr req_mask;
-	struct rt *routes;
+	struct rt_head *routes;
 	char **config;
 
 	char **environ;
 	char script[PATH_MAX];
-	
+
 	char hostname[HOSTNAME_MAX_LEN + 1]; /* We don't store the length */
 	int fqdn;
 	uint8_t vendorclassid[VENDORCLASSID_MAX_LEN + 2];
@@ -115,7 +148,16 @@ struct if_options {
 	size_t arping_len;
 	in_addr_t *arping;
 	char *fallback;
+
+#ifdef INET6
+	uint16_t ia_type;
+	size_t iaid_len;
+	struct if_iaid *iaid;
+	int dadtransmits;
+#endif
 };
+
+extern unsigned long long options;
 
 struct if_options *read_config(const char *,
     const char *, const char *, const char *);

@@ -1,14 +1,14 @@
 # dhcpcd Makefile
 
 PROG=		dhcpcd
-SRCS=		arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c eloop.c
-SRCS+=		if-options.c if-pref.c ipv4ll.c ipv6rs.c net.c signals.c
-SRCS+=		configure.c
+SRCS=		common.c control.c dhcpcd.c duid.c eloop.c
+SRCS+=		if-options.c if-pref.c net.c script.c
+SRCS+=		dhcp-common.c
 
 CFLAGS?=	-O2
 CSTD?=		c99
-CFLAGS+=	-std=${CSTD}
 include config.mk
+CFLAGS+=	-std=${CSTD}
 
 OBJS+=		${SRCS:.c=.o} ${COMPAT_SRCS:.c=.o}
 
@@ -121,6 +121,64 @@ import:
 			sed -e 's/^.*c //g' -e 's/.*\.c$$//g' -e 's/\\//g' | \
 			tr ' ' '\n' | \
 			sort -u) /tmp/${DISTPREFIX}/compat; \
+	fi;
+	if test -n "${IMPORT_RCSID}"; then \
+		for x in \
+		    /tmp/${DISTPREFIX}/*.c \
+		    /tmp/${DISTPREFIX}/compat/*.c \
+		; do \
+			if test -e "$$x"; then \
+				printf "${IMPORT_RCSID}\n\n" >"$$x".new; \
+				cat "$$x" >>"$$x".new; \
+				mv "$$x".new "$$x"; \
+			fi; \
+		done; \
+	fi;
+	if test -n "${IMPORT_HID}"; then \
+		for x in \
+		    /tmp/${DISTPREFIX}/*.h \
+		    /tmp/${DISTPREFIX}/compat/*.h \
+		; do \
+			if test -e "$$x"; then \
+				printf "${IMPORT_HID}\n\n" >"$$x".new; \
+				cat "$$x" >>"$$x".new; \
+				mv "$$x".new "$$x"; \
+			fi; \
+		done; \
+	fi;
+	if test -n "${IMPORT_MANID}"; then \
+		for x in \
+		    /tmp/${DISTPREFIX}/dhcpcd.8.in \
+		    /tmp/${DISTPREFIX}/dhcpcd-run-hooks.8.in \
+		    /tmp/${DISTPREFIX}/dhcpcd.conf.5.in \
+		; do \
+			if test -e "$$x"; then \
+				printf "${IMPORT_MANID}\n" >"$$x".new; \
+				cat "$$x" >>"$$x".new; \
+				mv "$$x".new "$$x"; \
+			fi; \
+		done; \
+	fi;
+	if test -n "${IMPORT_SHID}"; then \
+		for x in \
+		    /tmp/${DISTPREFIX}/dhcpcd-run-hooks.in \
+		    /tmp/${DISTPREFIX}/dhcpcd.conf \
+		; do \
+			if test -e "$$x"; then \
+				if test "$$(sed -ne 1p $$x)" = "#!/bin/sh" \
+				; then \
+					echo "#!/bin/sh" > "$$x".new; \
+					printf "${IMPORT_SHID}\n" >>"$$x".new; \
+					echo "" >>"$$x".new; \
+					sed 1d "$$x" >>"$$x".new; \
+				else \
+					printf "${IMPORT_SHID}\n" >>"$$x".new; \
+					echo "" >>"$$x".new; \
+					cat "$$x" >>"$$x".new; \
+				fi; \
+				mv "$$x".new "$$x"; \
+			fi; \
+		done; \
 	fi;
 	cd dhcpcd-hooks; ${MAKE} DISTPREFIX=${DISTPREFIX} $@
 

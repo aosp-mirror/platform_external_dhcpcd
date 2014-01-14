@@ -1,4 +1,4 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
  * Copyright (c) 2006-2009 Roy Marples <roy@marples.name>
  * All rights reserved
@@ -36,6 +36,11 @@ closefrom(int fd)
 	int i;
 	int r = 0;
 
+#ifdef _SC_OPEN_MAX
+	max = sysconf(_SC_OPEN_MAX);
+#else
+	max = getdtablesize();
+#endif
 	for (i = fd; i < max; i++)
 		r += close(i);
 	return r;

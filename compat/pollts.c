@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2008 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2013 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -25,12 +25,39 @@
  * SUCH DAMAGE.
  */
 
-#ifndef SIGNAL_H
-#define SIGNAL_H
+#include <sys/time.h>
+#include <sys/types.h>
 
-int signal_init(void);
-int signal_setup(void);
-int signal_reset(void);
-int signal_read(void);
+#include <limits.h>
+#include <poll.h>
+#include <signal.h>
+#include <unistd.h>
 
-#endif
+#include "pollts.h"
+
+#warning "This pollts(2) implementation is not entirely race condition safe."
+#warning "Only operating system support for pollts(2) can correct this."
+
+int
+pollts(struct pollfd *restrict fds, nfds_t nfds,
+    const struct timespec *restrict ts, const sigset_t *restrict sigmask)
+{
+	int r, timeout;
+	sigset_t oldset;
+
+	if (ts == NULL)
+		timeout = -1;
+	else if (ts->tv_sec > INT_MAX / 1000 ||
+	    (ts->tv_sec == INT_MAX / 1000 &&
+	    (ts->tv_nsec + 999999) / 1000000 > INT_MAX % 1000000))
+		timeout = INT_MAX;
+	else
+		timeout = ts->tv_sec * 1000 + (ts->tv_nsec + 999999) / 1000000;
+	if (sigmask && sigprocmask(SIG_SETMASK, sigmask, &oldset) == -1)
+		return -1;
+	r = poll(fds, nfds, timeout);
+	if (sigmask && sigprocmask(SIG_SETMASK, &oldset, NULL) == -1)
+		return -1;
+
+	return r;
+}

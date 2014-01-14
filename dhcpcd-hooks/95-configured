@@ -32,4 +32,14 @@ EXPIRE|FAIL|IPV4LL|STOP)
 RELEASE)
     setprop dhcp.${intf}.result "released"
     ;;
+
+ROUTERADVERT)
+    setprop dhcp.${intf}.ra1_from "${ra1_from}"
+    setprop dhcp.${intf}.ra1_mtu "${ra1_mtu}"
+    setprop dhcp.${intf}.ra1_prefix "${ra1_prefix}"
+    setprop dhcp.${intf}.ra1_prefix_len "${ra1_prefix_len}"
+    setprop dhcp.${intf}.ra1_prefix_vltime "${ra1_prefix_vltime}"
+    setprop dhcp.${intf}.ra1_prefix_pltime "${ra1_prefix_pltime}"
+    setprop dhcp.${intf}.ra1_count "${ra_count}"
+    ;;
 esac
