@@ -1,0 +1,50 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "6dd0f588_7c718124",
+        "filename": "ipv6rs.c",
+        "patchSetId": 2
+      },
+      "lineNbr": 244,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2014-01-16T19:08:47Z",
+      "side": 1,
+      "message": "Why you comment this line? (especially with C++ comments)",
+      "range": {
+        "startLine": 244,
+        "startChar": 1,
+        "endLine": 244,
+        "endChar": 3
+      },
+      "revId": "44308a1dc439dec31b45b36836670a70f5fc5fad",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "2dca7dde_4f2685e7",
+        "filename": "ipv6rs.c",
+        "patchSetId": 2
+      },
+      "lineNbr": 257,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2014-01-16T19:08:47Z",
+      "side": 1,
+      "message": "Original 6.0.5 code is using ifp-\u003eindex",
+      "range": {
+        "startLine": 257,
+        "startChar": 19,
+        "endLine": 257,
+        "endChar": 33
+      },
+      "revId": "44308a1dc439dec31b45b36836670a70f5fc5fad",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}

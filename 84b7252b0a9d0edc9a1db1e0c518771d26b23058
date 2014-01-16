@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "2dca7dde_9a09dd49",
+        "filename": "dhcpcd.c",
+        "patchSetId": 2
+      },
+      "lineNbr": 1851,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2014-01-16T19:08:47Z",
+      "side": 0,
+      "message": "You dropped avoid routes \"feature\"",
+      "range": {
+        "startLine": 1851,
+        "startChar": 3,
+        "endLine": 1851,
+        "endChar": 15
+      },
+      "revId": "84b7252b0a9d0edc9a1db1e0c518771d26b23058",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}
