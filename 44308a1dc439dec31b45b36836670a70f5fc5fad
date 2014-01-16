@@ -2,6 +2,46 @@
   "comments": [
     {
       "key": {
+        "uuid": "8d69a9a4_f9d3b7ea",
+        "filename": "/COMMIT_MSG",
+        "patchSetId": 2
+      },
+      "lineNbr": 14,
+      "author": {
+        "id": 1000451
+      },
+      "writtenOn": "2014-01-16T20:05:15Z",
+      "side": 1,
+      "message": "Are there any other justifications for this update?\n\nI\u0027m all for keeping ahead of bitrot, except:\n\n1.  We don\u0027t want DHCPv6 and stateful address configuration (1 \u0026 3).\n2.  We already do stateless autoconf (2) in the kernel.\n\nIf this does SLAAC (2) in userspace, has this been tested for interaction with the kernel\u0027s efforts to do the same?  Alternately, does it disable the in-kernel behaviour somewhere (via /proc/sys/net in a script or sysctl in one of the .c files)?\n\n(Also, re #3: \"stateful\" and \"auto\" don\u0027t really go together.  :-)",
+      "revId": "44308a1dc439dec31b45b36836670a70f5fc5fad",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "8d69a9a4_59e3c3bf",
+        "filename": "Android.mk",
+        "patchSetId": 2
+      },
+      "lineNbr": 11,
+      "author": {
+        "id": 1000451
+      },
+      "writtenOn": "2014-01-16T20:05:15Z",
+      "side": 1,
+      "message": "How about we find a way to expressly disable this instead.",
+      "range": {
+        "startLine": 11,
+        "startChar": 13,
+        "endLine": 11,
+        "endChar": 19
+      },
+      "revId": "44308a1dc439dec31b45b36836670a70f5fc5fad",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    },
+    {
+      "key": {
         "uuid": "6dd0f588_7c718124",
         "filename": "ipv6rs.c",
         "patchSetId": 2
