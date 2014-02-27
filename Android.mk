@@ -11,14 +11,12 @@ LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
 	if-linux.c if-linux-wireless.c lpf.c compat/getline.c \
 	platform-linux.c compat/closefrom.c ifaddrs.c ipv6rs.c
 
-#LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils
 LOCAL_MODULE = dhcpcd
 include $(BUILD_EXECUTABLE)
 
 include $(CLEAR_VARS)
 LOCAL_SRC_FILES := showlease.c
-#LOCAL_C_INCLUDES := $(KERNEL_HEADERS)
 LOCAL_SHARED_LIBRARIES := libc
 LOCAL_MODULE = showlease
 LOCAL_MODULE_TAGS := debug
