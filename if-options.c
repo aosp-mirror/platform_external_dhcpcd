@@ -796,7 +796,13 @@ read_config(const char *file,
 	ifo = xzalloc(sizeof(*ifo));
 	ifo->options |= DHCPCD_GATEWAY | DHCPCD_DAEMONISE | DHCPCD_LINK;
 	ifo->options |= DHCPCD_ARP | DHCPCD_IPV4LL;
+#ifndef ANDROID
+	/* On Android, don't enable IPv6 RS processing. This is because we
+	 * already process RAs in the kernel and netd and because we've seen
+	 * dhcpcd crashes when parsing certain RA options.
+	 * See http://b/15268738 and http://b/15779617 . */
 	ifo->options |= DHCPCD_IPV6RS | DHCPCD_IPV6RA_REQRDNSS;
+#endif
 	ifo->timeout = DEFAULT_TIMEOUT;
 	ifo->reboot = DEFAULT_REBOOT;
 	ifo->metric = -1;
