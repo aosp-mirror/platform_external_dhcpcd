@@ -13,6 +13,10 @@ LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
 
 LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils
 LOCAL_MODULE = dhcpcd
+ifeq (true,$(TARGET_PREFER_32_BIT_EXECUTABLES))
+# We are doing a 32p build, force recovery to be 64bit
+LOCAL_MULTILIB := 64
+endif
 include $(BUILD_EXECUTABLE)
 
 include $(CLEAR_VARS)
