@@ -352,7 +352,7 @@ get_option(const struct dhcp_message *dhcp, uint8_t opt, int *len, int *type)
 		case DHO_OPTIONSOVERLOADED:
 			/* Ensure we only get this option once */
 			if (!overl)
-				overl = p[1];
+				overl = 0x80 | p[1];
 			break;
 		}
 		l = *p++;
