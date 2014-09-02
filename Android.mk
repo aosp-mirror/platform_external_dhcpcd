@@ -11,6 +11,8 @@ LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
 	if-linux.c if-linux-wireless.c lpf.c \
 	platform-linux.c compat/closefrom.c ifaddrs.c ipv6rs.c
 
+# Clang complains about configure.c's comparing array with null.
+LOCAL_CFLAGS += -Wno-tautological-pointer-compare
 LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils
 LOCAL_MODULE = dhcpcd
 include $(BUILD_EXECUTABLE)
