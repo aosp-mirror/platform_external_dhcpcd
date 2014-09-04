@@ -35,6 +35,10 @@
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 
+#ifdef ANDROID
+#include <linux/if.h>
+#endif
+
 /* Support older kernels */
 #ifndef IFLA_WIRELESS
 # define IFLA_WIRELESS (IFLA_MASTER + 1)
