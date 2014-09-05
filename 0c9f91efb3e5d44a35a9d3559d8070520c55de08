@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "50dbd705_f7dccff7",
+        "filename": "if-linux.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 60,
+      "author": {
+        "id": 1003224
+      },
+      "writtenOn": "2014-09-05T01:30:49Z",
+      "side": 1,
+      "message": "yeah, i don\u0027t understand this comment at all, unless he\u0027s implying that dhcpcd usually includes a subset of the kernel headers?",
+      "revId": "0c9f91efb3e5d44a35a9d3559d8070520c55de08",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}
