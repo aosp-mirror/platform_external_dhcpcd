@@ -16,6 +16,24 @@
       "revId": "0c9f91efb3e5d44a35a9d3559d8070520c55de08",
       "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
       "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "10807fc3_642c88b6",
+        "filename": "if-linux.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 60,
+      "author": {
+        "id": 1019050
+      },
+      "writtenOn": "2014-09-05T01:37:03Z",
+      "side": 1,
+      "message": "I looked, and it is true that glibc does include it\u0027s own version of if.h (gnu/net/if.h) which does not include IFF_LOWER_UP. So it does seem that this code is correct under some circumstances and could fail to compile. I think this move is the safest way to fix this.\n\nBut I will contact upstream to see if he has a better possible change.",
+      "parentUuid": "50dbd705_f7dccff7",
+      "revId": "0c9f91efb3e5d44a35a9d3559d8070520c55de08",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
     }
   ]
 }
