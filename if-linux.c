@@ -40,13 +40,6 @@
 # define IFLA_WIRELESS (IFLA_MASTER + 1)
 #endif
 
-/* For some reason, glibc doesn't include newer flags from linux/if.h
- * However, we cannot include linux/if.h directly as it conflicts
- * with the glibc version. D'oh! */
-#ifndef IFF_LOWER_UP
-#define IFF_LOWER_UP	0x10000		/* driver signals L1 up		*/
-#endif
-
 #include <errno.h>
 #include <ctype.h>
 #include <stddef.h>
@@ -60,6 +53,15 @@
 #include "configure.h"
 #include "dhcp.h"
 #include "net.h"
+
+/* ANDROID change, moved this below all includes. */
+/* For some reason, glibc doesn't include newer flags from linux/if.h
+ * However, we cannot include linux/if.h directly as it conflicts
+ * with the glibc version. D'oh! */
+#ifndef IFF_LOWER_UP
+#define IFF_LOWER_UP	0x10000		/* driver signals L1 up		*/
+#endif
+/* End of ANDROID change */
 
 static int sock_fd;
 static struct sockaddr_nl sock_nl;
