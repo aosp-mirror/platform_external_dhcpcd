@@ -313,7 +313,11 @@ get_option(const struct dhcp_message *dhcp, uint8_t opt, int *len, int *type)
 	const uint8_t *op = NULL;
 	int bl = 0;
 
-	while (p < e) {
+	/* DHCP Options are in TLV format with T and L each being a single
+	 * byte.  In general, here we have p -> T, ol=p+1 -> L, op -> V.
+	 * We must make sure there is enough room to read both T and L.
+	 */
+	while (p + 1 < e) {
 		o = *p++;
 		if (o == opt) {
 			if (op) {
@@ -328,7 +332,7 @@ get_option(const struct dhcp_message *dhcp, uint8_t opt, int *len, int *type)
 				memcpy(bp, op, ol);
 				bp += ol;
 			}
-			ol = *p;
+			ol = (p + *p < e) ? *p : e - (p + 1);
 			op = p + 1;
 			bl += ol;
 		}
@@ -1362,6 +1366,10 @@ print_option(char *s, ssize_t len, int type, int dl, const uint8_t *data)
 			data += sizeof(addr.s_addr);
 		} else
 			l = 0;
+		if (len <= l) {
+			bytes += len;
+			break;
+		}
 		len -= l;
 		bytes += l;
 		s += l;

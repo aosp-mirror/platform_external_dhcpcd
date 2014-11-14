@@ -49,3 +49,11 @@ LOCAL_MODULE_CLASS := ETC
 LOCAL_MODULE_PATH := $(hooks_target)
 LOCAL_SRC_FILES := $(hooks_dir)/$(LOCAL_MODULE)
 include $(BUILD_PREBUILT)
+
+# Unit tests.
+include $(CLEAR_VARS)
+LOCAL_MODULE := dhcpcd_test
+LOCAL_CFLAGS := -Wall -Werror -Wunused-parameter
+LOCAL_SRC_FILES := dhcpcd_test.cpp dhcp.c common.c
+LOCAL_MODULE_TAGS := eng tests
+include $(BUILD_NATIVE_TEST)
