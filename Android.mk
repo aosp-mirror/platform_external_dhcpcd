@@ -46,6 +46,13 @@ LOCAL_SRC_FILES := $(hooks_dir)/$(LOCAL_MODULE)
 include $(BUILD_PREBUILT)
 
 include $(CLEAR_VARS)
+LOCAL_MODULE := 25-static-routes.conf
+LOCAL_MODULE_CLASS := ETC
+LOCAL_MODULE_PATH := $(hooks_target)
+LOCAL_SRC_FILES := $(hooks_dir)/$(LOCAL_MODULE)
+include $(BUILD_PREBUILT)
+
+include $(CLEAR_VARS)
 LOCAL_MODULE := 95-configured
 LOCAL_MODULE_CLASS := ETC
 LOCAL_MODULE_PATH := $(hooks_target)
