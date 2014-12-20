@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "217ffc22_f2c460d3",
+        "filename": "dhcpcd-hooks/25-static-routes.conf",
+        "patchSetId": 2
+      },
+      "lineNbr": 4,
+      "author": {
+        "id": 1002609
+      },
+      "writtenOn": "2014-12-20T01:21:18Z",
+      "side": 1,
+      "message": "As L commented in the CL, this isn\u0027t adding any more vulnerability than specifying the default gateway already provides..  Lets remove the nonactionable scary language..",
+      "range": {
+        "startLine": 4,
+        "startChar": 0,
+        "endLine": 4,
+        "endChar": 9
+      },
+      "revId": "f060538f0093dc87646f5ddc86c715916965926e",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}
