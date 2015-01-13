@@ -37,7 +37,7 @@
 # define SCRIPT			LIBEXECDIR "/" PACKAGE "-run-hooks"
 #endif
 #ifndef DUID
-# define DUID			SYSCONFDIR "/" PACKAGE ".duid"
+# define DUID			RUNDIR "/" PACKAGE ".duid"
 #endif
 #ifndef LEASEFILE
 # define LEASEFILE		DBDIR "/" PACKAGE "-%s.lease"
