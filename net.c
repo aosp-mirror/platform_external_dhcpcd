@@ -197,6 +197,25 @@ hwaddr_aton(unsigned char *buffer, const char *addr)
 	return len;
 }
 
+static void net_set_leasefile(struct interface* iface) {
+	if(!iface->wireless) {
+		snprintf(iface->leasefile, sizeof(iface->leasefile),
+				LEASEFILE, iface->name, "wired");
+		return;
+	}
+	char ssid[IF_SSIDSIZE];
+	int i;
+	for(i=0; i<IF_SSIDSIZE &&
+			iface->ssid[i]; ++i) {
+		if(!isalnum(iface->ssid[i]))
+			continue;
+		ssid[i] = iface->ssid[i];
+	}
+	ssid[i] = 0;
+	snprintf(iface->leasefile, sizeof(iface->leasefile),
+			LEASEFILE, iface->name, ssid);
+}
+
 struct interface *
 init_interface(const char *ifname)
 {
@@ -229,8 +248,7 @@ init_interface(const char *ifname)
 			goto eexit;
 	}
 
-	snprintf(iface->leasefile, sizeof(iface->leasefile),
-	    LEASEFILE, ifname);
+	net_set_leasefile(iface);
 	/* 0 is a valid fd, so init to -1 */
 	iface->raw_fd = -1;
 	iface->udp_fd = -1;
