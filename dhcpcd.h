@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2015 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -30,147 +30,143 @@
 
 #include <sys/socket.h>
 #include <net/if.h>
-#include <netinet/in.h>
 
-#include <limits.h>
-
+#include "config.h"
+#include "defs.h"
 #include "control.h"
-#include "dhcp.h"
 #include "if-options.h"
 
-#define HWADDR_LEN 20
-#define IF_SSIDSIZE 33
-#define PROFILE_LEN 64
+#define HWADDR_LEN	20
+#define IF_SSIDSIZE	33
+#define PROFILE_LEN	64
+#define SECRET_LEN	64
 
-enum DHS {
-	DHS_INIT,
-	DHS_DISCOVER,
-	DHS_REQUEST,
-	DHS_BOUND,
-	DHS_RENEW,
-	DHS_REBIND,
-	DHS_REBOOT,
-	DHS_INFORM,
-	DHS_RENEW_REQUESTED,
-	DHS_INIT_IPV4LL,
-	DHS_PROBE
-};
-
-#define LINK_UP 	1
+#define LINK_UP		1
 #define LINK_UNKNOWN	0
-#define LINK_DOWN 	-1
+#define LINK_DOWN	-1
 
-struct if_state {
-	enum DHS state;
-	char profile[PROFILE_LEN];
-	struct if_options *options;
-	struct dhcp_message *sent;
-	struct dhcp_message *offer;
-	struct dhcp_message *new;
-	struct dhcp_message *old;
-	struct dhcp_lease lease;
-	const char *reason;
-	time_t interval;
-	time_t nakoff;
-	uint32_t xid;
-	int socket;
-	int probes;
-	int claims;
-	int conflicts;
-	time_t defend;
-	struct in_addr fail;
-	size_t arping_index;
-};
+#define IF_DATA_IPV4	0
+#define IF_DATA_DHCP	1
+#define IF_DATA_IPV6	2
+#define IF_DATA_IPV6ND	3
+#define IF_DATA_DHCP6	4
+#define IF_DATA_MAX	5
 
-struct ra_opt {
-	uint8_t type;
-	struct timeval expire;
-	char *option;
-	struct ra_opt *next;
-};
-
-struct ra {
-	struct in6_addr from;
-	char sfrom[INET6_ADDRSTRLEN];
-	unsigned char *data;
-	ssize_t data_len;
-	struct timeval received;
-	uint32_t lifetime;
-	struct in6_addr prefix;
-	int prefix_len;
-	uint32_t prefix_vltime;
-	uint32_t prefix_pltime;
-	char sprefix[INET6_ADDRSTRLEN];
-	struct ra_opt *options;
-	int expired;
-	struct ra *next;
-};
+/* If the interface does not support carrier status (ie PPP),
+ * dhcpcd can poll it for the relevant flags periodically */
+#define IF_POLL_UP	100	/* milliseconds */
 
 struct interface {
+	struct dhcpcd_ctx *ctx;
+	TAILQ_ENTRY(interface) next;
 	char name[IF_NAMESIZE];
-	struct if_state *state;
-
-	int flags;
+#ifdef __linux
+	char alias[IF_NAMESIZE];
+#endif
+	unsigned int index;
+	unsigned int flags;
 	sa_family_t family;
+#ifdef __FreeBSD__
+	struct sockaddr_storage linkaddr;
+#endif
 	unsigned char hwaddr[HWADDR_LEN];
-	size_t hwlen;
-	int metric;
+	uint8_t hwlen;
+	unsigned int metric;
 	int carrier;
 	int wireless;
-	char ssid[IF_SSIDSIZE];
+	uint8_t ssid[IF_SSIDSIZE];
+	unsigned int ssid_len;
 
-	int raw_fd;
+	char profile[PROFILE_LEN];
+	struct if_options *options;
+	void *if_data[IF_DATA_MAX];
+};
+TAILQ_HEAD(if_head, interface);
+
+struct dhcpcd_ctx {
+#ifdef USE_SIGNALS
+	sigset_t sigset;
+#endif
+	const char *cffile;
+	unsigned long long options;
+	int argc;
+	char **argv;
+	int ifac;	/* allowed interfaces */
+	char **ifav;	/* allowed interfaces */
+	int ifdc;	/* denied interfaces */
+	char **ifdv;	/* denied interfaces */
+	int ifc;	/* listed interfaces */
+	char **ifv;	/* listed interfaces */
+	int ifcc;	/* configured interfaces */
+	char **ifcv;	/* configured interfaces */
+	unsigned char *duid;
+	size_t duid_len;
+	int pid_fd;
+	int link_fd;
+	struct if_head *ifaces;
+
+	struct eloop_ctx *eloop;
+
+	int control_fd;
+	int control_unpriv_fd;
+	struct fd_list_head control_fds;
+	char control_sock[sizeof(CONTROLSOCKET) + IF_NAMESIZE];
+	gid_t control_group;
+
+	/* DHCP Enterprise options, RFC3925 */
+	struct dhcp_opt *vivso;
+	size_t vivso_len;
+
+#ifdef INET
+	struct dhcp_opt *dhcp_opts;
+	size_t dhcp_opts_len;
+	struct rt_head *ipv4_routes;
+
 	int udp_fd;
-	int arp_fd;
-	size_t buffer_size, buffer_len, buffer_pos;
-	unsigned char *buffer;
+	uint8_t *packet;
 
-	struct in_addr addr;
-	struct in_addr net;
-	struct in_addr dst;
+	/* Our aggregate option buffer.
+	 * We ONLY use this when options are split, which for most purposes is
+	 * practically never. See RFC3396 for details. */
+	uint8_t *opt_buffer;
+#endif
+#ifdef INET6
+	unsigned char secret[SECRET_LEN];
+	size_t secret_len;
 
-	char leasefile[PATH_MAX];
-	time_t start_uptime;
+	struct dhcp_opt *dhcp6_opts;
+	size_t dhcp6_opts_len;
+	struct ipv6_ctx *ipv6;
+#ifndef __linux__
+	int ra_global;
+#endif
+#endif /* INET6 */
 
-	unsigned char *clientid;
-
-	unsigned char *rs;
-	size_t rslen;
-	int rsprobes;
-	struct ra *ras;
-
-	struct interface *next;
+#ifdef PLUGIN_DEV
+	char *dev_load;
+	int dev_fd;
+	struct dev *dev;
+	void *dev_handle;
+#endif
 };
 
-extern int pidfd;
-extern unsigned long long options;
-extern int ifac;
-extern char **ifav;
-extern int ifdc;
-extern char **ifdv;
-extern struct interface *ifaces;
-extern int avoid_routes;
+#ifdef USE_SIGNALS
+extern const int dhcpcd_handlesigs[];
+#endif
 
-struct interface *find_interface(const char *);
-int handle_args(struct fd_list *, int, char **);
-void handle_carrier(int, int, const char *);
-void handle_interface(int, const char *);
-void handle_hwaddr(const char *, unsigned char *, size_t);
-void handle_ifa(int, const char *,
-    struct in_addr *, struct in_addr *, struct in_addr *);
-void handle_exit_timeout(void *);
-void start_interface(void *);
-void start_discover(void *);
-void start_request(void *);
-void start_renew(void *);
-void start_rebind(void *);
-void start_reboot(struct interface *);
-void start_expire(void *);
-void send_decline(struct interface *);
-void open_sockets(struct interface *);
-void close_sockets(struct interface *);
-void drop_dhcp(struct interface *, const char *);
-void drop_interface(struct interface *, const char *);
-int select_profile(struct interface *, const char *);
+int dhcpcd_oneup(struct dhcpcd_ctx *);
+int dhcpcd_ipwaited(struct dhcpcd_ctx *);
+pid_t dhcpcd_daemonise(struct dhcpcd_ctx *);
+
+int dhcpcd_handleargs(struct dhcpcd_ctx *, struct fd_list *, int, char **);
+void dhcpcd_handlecarrier(struct dhcpcd_ctx *, int, unsigned int, const char *);
+int dhcpcd_handleinterface(void *, int, const char *);
+void dhcpcd_handlehwaddr(struct dhcpcd_ctx *, const char *,
+    const unsigned char *, uint8_t);
+void dhcpcd_dropinterface(struct interface *, const char *);
+int dhcpcd_selectprofile(struct interface *, const char *);
+
+void dhcpcd_startinterface(void *);
+void dhcpcd_initstate(struct interface *);
 
 #endif

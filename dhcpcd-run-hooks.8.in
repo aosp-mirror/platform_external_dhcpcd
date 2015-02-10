@@ -1,4 +1,4 @@
-.\" Copyright (c) 2006-2012 Roy Marples
+.\" Copyright (c) 2006-2015 Roy Marples
 .\" All rights reserved
 .\"
 .\" Redistribution and use in source and binary forms, with or without
@@ -22,7 +22,7 @@
 .\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd March 19, 2012
+.Dd October 3, 2014
 .Dt DHCPCD-RUN-HOOKS 8
 .Os
 .Sh NAME
@@ -69,23 +69,28 @@ argument.
 Here's a list of reasons why
 .Nm
 could be invoked:
-.Bl -tag -width ROUTERADVERT
+.Bl -tag -width EXPIREXXXEXPIRE6
 .It Dv PREINIT
 dhcpcd is starting up and any pre-initialisation should be done.
 .It Dv CARRIER
 dhcpcd has detected the carrier is up.
 This is generally just a notification and no action need be taken.
-.It Dv INFORM
+.It Dv NOCARRIER
+dhcpcd lost the carrier.
+The cable may have been unplugged or association to the wireless point lost.
+.It Dv INFORM | Dv INFORM6
 dhcpcd informed a DHCP server about it's address and obtained other
 configuration details.
-.It Dv BOUND
+.It Dv BOUND | Dv BOUND6
 dhcpcd obtained a new lease from a DHCP server.
-.It Dv RENEW
+.It Dv RENEW | Dv RENEW6
 dhcpcd renewed it's lease.
-.It Dv REBIND
+.It Dv REBIND | Dv REBIND6
 dhcpcd has rebound to a new DHCP server.
-.It Dv REBOOT
+.It Dv REBOOT | Dv REBOOT6
 dhcpcd successfully requested a lease from a DHCP server.
+.It Dv DELEGATED6
+dhcpcd assigned a delegated prefix to the interface.
 .It Dv IPV4LL
 dhcpcd failed to contact any DHCP servers but did obtain an IPV4LL address.
 .It Dv STATIC
@@ -95,23 +100,26 @@ obtained from a DHCP server.
 dhcpcd is monitoring the interface for a 3rd party to give it an IP address.
 .It Dv TIMEOUT
 dhcpcd failed to contact any DHCP servers but was able to use an old lease.
-.It Dv EXPIRE
+.It Dv EXPIRE | EXPIRE6
 dhcpcd's lease or state expired and it failed to obtain a new one.
-.It Dv RELEASE
-dhcpcd's lease was released back to the DHCP server for re-use.
 .It Dv NAK
 dhcpcd received a NAK from the DHCP server.
 This should be treated as EXPIRE.
-.It Dv NOCARRIER
-dhcpcd lost the carrier.
-The cable may have been unplugged or association to the wireless point lost.
+.It Dv RECONFIGURE
+dhcpcd has been instructed to reconfigure an interface.
+.It Dv ROUTERADVERT
+dhcpcd has received an IPv6 Router Advertisment, or one has expired.
+.It Dv STOP | Dv STOP6
+dhcpcd stopped running on the interface.
+.It Dv STOPPED
+dhcpcd has stopped entirely.
+.It Dv DEPARTED
+The interface has been removed.
 .It Dv FAIL
 dhcpcd failed to operate on the interface.
 This normally happens when dhcpcd does not support the raw interface, which
 means it cannot work as a DHCP or ZeroConf client.
 Static configuration and DHCP INFORM is still allowed.
-.It Dv STOP
-dhcpcd stopped running on the interface.
 .It Dv DUMP
 dhcpcd has been asked to dump the last lease for the interface.
 .It Dv TEST
@@ -119,8 +127,75 @@ dhcpcd received an OFFER from a DHCP server but will not configure the
 interface.
 This is primarily used to test the variables are filled correctly for the
 script to process them.
-.It Dv ROUTERADVERT
-dhcpcd has received an IPv6 Router Advertisment, or one has expired.
+.El
+.Sh ENVIRONMENT
+.Nm dhcpcd
+will clear the environment variables aside from
+.Ev $PATH
+and
+.Ev $RC_SVCNAME .
+The following variables will then be set, along with any protocol supplied
+ones.
+.Bl -tag -width xnew_delegated_dhcp6_prefix
+.It Ev $interface
+the name of the interface.
+.It Ev $reason
+as described above.
+.It Ev $pid
+the pid of
+.Nm dhcpcd .
+.It Ev $ifcarrier
+the link status of
+.Ev $interface :
+.Dv unknown ,
+.Dv up
+or
+.Dv down .
+.It Ev $ifmetric
+.Ev $interface
+preference, lower is better.
+.It Ev $ifwireless
+.Dv 1 if
+.Ev $interface
+is wireless, otherwise
+.Dv 0 .
+.It Ev $ifflags
+.Ev $interface
+flags.
+.It Ev $ifmtu
+.Ev $interface
+MTU.
+.It Ev $ifssid
+the name of the SSID the
+.Ev interface
+is connected to.
+.It Ev $interface_order
+A list of interfaces, in order of preference.
+.It Ev $if_up
+.Dv true
+if the
+.Ev interface
+is up, otherwise
+.Dv false .
+.It Ev $if_down
+.Dv true
+if the
+.Ev interface
+is down, otherwise
+.Dv false .
+.It Ev $if_oneup
+.Dv true
+if any interface is up, otherwise false.
+.It Ev $if_ipwaited
+.Dv true
+if any interface has been assigned an IP address which matches any wait
+requirements specified in
+.Xr dhcpcd.conf 5 .
+.It Ev $profile
+the name of the profile selected from
+.Xr dhcpcd.conf 5 .
+.It Ev $new_delegated_dhcp6_prefix
+space separated list of delegated prefixes.
 .El
 .Sh FILES
 When
@@ -134,15 +209,14 @@ in a lexical order and then finally
 .Sh SEE ALSO
 .Xr dhcpcd 8
 .Sh AUTHORS
-.An Roy Marples Aq roy@marples.name
+.An Roy Marples Aq Mt roy@marples.name
 .Sh BUGS
 Please report them to
 .Lk http://roy.marples.name/projects/dhcpcd
 .Sh SECURITY CONSIDERATIONS
-Little validation of DHCP options is done in dhcpcd itself.
-Instead, it is up to the hooks to handle any validation needed.
-To this end, some helper functions are provided, such as valid_domainname as
-used by the
-.Pa 20-resolv.conf
-hook to ensure that the hostname is not set to an invalid value.
-valid_path is also provided, but is currently unused by a stock hook script.
+.Nm dhcpcd
+will validate the content of each option against its encoding.
+For string, ascii, raw or binhex encoding it's up to the user to validate it
+for the intended purpose.
+.Pp
+When used in a shell script, each variable must be quoted correctly.

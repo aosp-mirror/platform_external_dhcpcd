@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2008 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2015 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -28,8 +28,7 @@
 #ifndef ARP_H
 #define ARP_H
 
-/* These are for IPV4LL, RFC 3927.
- * We put them here as we use the timings for all ARP foo. */
+/* ARP timings from RFC5227 */
 #define PROBE_WAIT		 1
 #define PROBE_NUM		 3
 #define PROBE_MIN		 1
@@ -43,7 +42,39 @@
 
 #include "dhcpcd.h"
 
-void send_arp_announce(void *);
-void send_arp_probe(void *);
-void start_arping(struct interface *);
+struct arp_msg {
+	uint16_t op;
+	unsigned char sha[HWADDR_LEN];
+	struct in_addr sip;
+	unsigned char tha[HWADDR_LEN];
+	struct in_addr tip;
+};
+
+struct arp_state {
+	TAILQ_ENTRY(arp_state) next;
+	struct interface *iface;
+
+	void (*probed_cb)(struct arp_state *);
+	void (*announced_cb)(struct arp_state *);
+	void (*conflicted_cb)(struct arp_state *, const struct arp_msg *);
+
+	struct in_addr addr;
+	int probes;
+	int claims;
+	struct in_addr failed;
+};
+TAILQ_HEAD(arp_statehead, arp_state);
+
+#ifdef INET
+void arp_report_conflicted(const struct arp_state *, const struct arp_msg *);
+void arp_announce(struct arp_state *);
+void arp_probe(struct arp_state *);
+struct arp_state *arp_new(struct interface *);
+void arp_cancel(struct arp_state *);
+void arp_free(struct arp_state *);
+void arp_free_but(struct arp_state *);
+void arp_close(struct interface *);
+#else
+#define arp_close(a) {}
+#endif
 #endif

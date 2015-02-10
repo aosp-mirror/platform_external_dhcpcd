@@ -6,10 +6,37 @@ hooks_dir := dhcpcd-hooks
 hooks_target := $(etc_dir)/$(hooks_dir)
 
 include $(CLEAR_VARS)
-LOCAL_SRC_FILES := arp.c bind.c common.c control.c dhcp.c dhcpcd.c duid.c \
-	eloop.c if-options.c if-pref.c ipv4ll.c net.c signals.c configure.c \
-	if-linux.c if-linux-wireless.c lpf.c \
-	platform-linux.c compat/closefrom.c ifaddrs.c ipv6rs.c
+LOCAL_SRC_FILES := \
+	arp.c \
+	auth.c \
+	common.c \
+	control.c \
+	dhcp6.c \
+	dhcp.c \
+	dhcpcd.c \
+	dhcp-common.c \
+	dhcpcd-embedded.c \
+	duid.c \
+	eloop.c \
+	if.c \
+	if-linux.c \
+	if-linux-wext.c \
+	if-options.c \
+	ipv4.c \
+	ipv4ll.c \
+	ipv6.c \
+	ipv6nd.c \
+	script.c \
+	compat/closefrom.c \
+	compat/posix_spawn.c \
+	crypt/hmac_md5.c \
+	crypt/md5.c \
+	crypt/sha256.c \
+
+# should be in compat/ (or libc).
+LOCAL_SRC_FILES += ifaddrs.c
+
+LOCAL_CFLAGS += -DINET -DINET6 -I$(LOCAL_PATH)/crypt
 
 # Clang complains about configure.c's comparing array with null.
 LOCAL_CFLAGS += -Wno-tautological-pointer-compare
@@ -17,12 +44,12 @@ LOCAL_SHARED_LIBRARIES := libc libcutils libnetutils
 LOCAL_MODULE = dhcpcd
 include $(BUILD_EXECUTABLE)
 
-include $(CLEAR_VARS)
-LOCAL_SRC_FILES := showlease.c
-LOCAL_SHARED_LIBRARIES := libc
-LOCAL_MODULE = showlease
-LOCAL_MODULE_TAGS := debug
-include $(BUILD_EXECUTABLE)
+#include $(CLEAR_VARS)
+#LOCAL_SRC_FILES := showlease.c
+#LOCAL_SHARED_LIBRARIES := libc
+#LOCAL_MODULE = showlease
+#LOCAL_MODULE_TAGS := debug
+#include $(BUILD_EXECUTABLE)
 
 #include $(CLEAR_VARS)
 #LOCAL_MODULE := dhcpcd.conf

@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2015 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -32,22 +32,26 @@
 #include <syslog.h>
 #include <unistd.h>
 
+#define ELOOP_QUEUE 6
+#include "config.h"
 #include "arp.h"
 #include "common.h"
-#include "dhcpcd.h"
+#include "dhcp.h"
 #include "eloop.h"
+#include "if.h"
 #include "if-options.h"
 #include "ipv4ll.h"
-#include "net.h"
 
 static struct dhcp_message *
-make_ipv4ll_lease(uint32_t addr)
+ipv4ll_make_lease(uint32_t addr)
 {
 	uint32_t u32;
 	struct dhcp_message *dhcp;
 	uint8_t *p;
 
-	dhcp = xzalloc(sizeof(*dhcp));
+	dhcp = calloc(1, sizeof(*dhcp));
+	if (dhcp == NULL)
+		return NULL;
 	/* Put some LL options in */
 	dhcp->yiaddr = addr;
 	p = dhcp->options;
@@ -66,91 +70,195 @@ make_ipv4ll_lease(uint32_t addr)
 	return dhcp;
 }
 
-static struct dhcp_message *
-find_ipv4ll_lease(uint32_t old_addr)
+static in_addr_t
+ipv4ll_pick_addr(const struct arp_state *astate)
 {
-	uint32_t addr;
+	in_addr_t addr;
+	struct interface *ifp;
+	const struct dhcp_state *state;
 
 	for (;;) {
-		addr = htonl(LINKLOCAL_ADDR |
-		    (((uint32_t)abs((int)arc4random())
-			% 0xFD00) + 0x0100));
-		if (addr != old_addr &&
-		    IN_LINKLOCAL(ntohl(addr)))
+		/* RFC 3927 Section 2.1 states that the first 256 and
+		 * last 256 addresses are reserved for future use.
+		 * See ipv4ll_start for why we don't use arc4_random. */
+		addr = ntohl(LINKLOCAL_ADDR | ((random() % 0xFD00) + 0x0100));
+
+		/* No point using a failed address */
+		if (addr == astate->failed.s_addr)
+			continue;
+
+		/* Ensure we don't have the address on another interface */
+		TAILQ_FOREACH(ifp, astate->iface->ctx->ifaces, next) {
+			state = D_CSTATE(ifp);
+			if (state && state->addr.s_addr == addr)
+				break;
+		}
+
+		/* Yay, this should be a unique and workable IPv4LL address */
+		if (ifp == NULL)
 			break;
 	}
-	return make_ipv4ll_lease(addr);
+	return addr;
 }
 
-void
-start_ipv4ll(void *arg)
+static void
+ipv4ll_probed(struct arp_state *astate)
 {
-	struct interface *iface = arg;
-	uint32_t addr;
+	struct dhcp_state *state = D_STATE(astate->iface);
+	struct dhcp_message *offer;
 
-	delete_timeout(NULL, iface);
-	iface->state->probes = 0;
-	iface->state->claims = 0;
-	if (iface->addr.s_addr) {
-		iface->state->conflicts = 0;
-		if (IN_LINKLOCAL(htonl(iface->addr.s_addr))) {
-			send_arp_announce(iface);
-			return;
-		}
+	if (state->state != DHS_BOUND) {
+		/* A DHCP lease could have already been offered.
+		 * Backup and replace once the IPv4LL addres is bound */
+		offer = state->offer;
+		state->offer = ipv4ll_make_lease(astate->addr.s_addr);
+		if (state->offer == NULL)
+			syslog(LOG_ERR, "%s: %m", __func__);
+		else
+			dhcp_bind(astate->iface, astate);
+		state->offer = offer;
 	}
-
-	if (iface->state->offer == NULL)
-		addr = 0;
-	else {
-		addr = iface->state->offer->yiaddr;
-		free(iface->state->offer);
-	}
-	/* We maybe rebooting an IPv4LL address. */
-	if (!IN_LINKLOCAL(htonl(addr))) {
-		syslog(LOG_INFO, "%s: probing for an IPv4LL address",
-		    iface->name);
-		addr = 0;
-	}
-	if (addr == 0)
-		iface->state->offer = find_ipv4ll_lease(addr);
-	else
-		iface->state->offer = make_ipv4ll_lease(addr);
-	iface->state->lease.frominfo = 0;
-	send_arp_probe(iface);
 }
 
-void
-handle_ipv4ll_failure(void *arg)
+static void
+ipv4ll_announced(struct arp_state *astate)
 {
-	struct interface *iface = arg;
-	time_t up;
+	struct dhcp_state *state = D_STATE(astate->iface);
 
-	if (iface->state->fail.s_addr == iface->addr.s_addr) {
+	state->conflicts = 0;
+	/* Need to keep the arp state so we can defend our IP. */
+}
+
+static void
+ipv4ll_probe(void *arg)
+{
+
+	arp_probe(arg);
+}
+
+static void
+ipv4ll_conflicted(struct arp_state *astate, const struct arp_msg *amsg)
+{
+	struct dhcp_state *state = D_STATE(astate->iface);
+	in_addr_t fail;
+
+	fail = 0;
+	/* RFC 3927 2.2.1, Probe Conflict Detection */
+	if (amsg->sip.s_addr == astate->addr.s_addr ||
+	    (amsg->sip.s_addr == 0 && amsg->tip.s_addr == astate->addr.s_addr))
+		fail = astate->addr.s_addr;
+
+	/* RFC 3927 2.5, Conflict Defense */
+	if (IN_LINKLOCAL(htonl(state->addr.s_addr)) &&
+	    amsg->sip.s_addr == state->addr.s_addr)
+		fail = state->addr.s_addr;
+
+	if (fail == 0)
+		return;
+
+	astate->failed.s_addr = fail;
+	arp_report_conflicted(astate, amsg);
+
+	if (astate->failed.s_addr == state->addr.s_addr) {
+		time_t up;
+
+		/* RFC 3927 Section 2.5 */
 		up = uptime();
-		if (iface->state->defend + DEFEND_INTERVAL > up) {
-			syslog(LOG_DEBUG,
-			    "%s: IPv4LL %d second defence failed",
-			    iface->name, DEFEND_INTERVAL);
-			drop_dhcp(iface, "EXPIRE");
-			iface->state->conflicts = -1;
+		if (state->defend + DEFEND_INTERVAL > up) {
+			syslog(LOG_WARNING,
+			    "%s: IPv4LL %d second defence failed for %s",
+			    astate->iface->name, DEFEND_INTERVAL,
+			    inet_ntoa(state->addr));
+			dhcp_drop(astate->iface, "EXPIRE");
 		} else {
-			syslog(LOG_DEBUG, "%s: defended IPv4LL address",
-			    iface->name);
-			iface->state->defend = up;
+			syslog(LOG_DEBUG, "%s: defended IPv4LL address %s",
+			    astate->iface->name, inet_ntoa(state->addr));
+			state->defend = up;
 			return;
 		}
 	}
 
-	close_sockets(iface);
-	free(iface->state->offer);
-	iface->state->offer = NULL;
-	delete_timeout(NULL, iface);
-	if (++iface->state->conflicts > MAX_CONFLICTS) {
+	arp_cancel(astate);
+	if (++state->conflicts == MAX_CONFLICTS)
 		syslog(LOG_ERR, "%s: failed to acquire an IPv4LL address",
-		    iface->name);
-		iface->state->interval = RATE_LIMIT_INTERVAL / 2;
-		start_discover(iface);
-	} else {
-		add_timeout_sec(PROBE_WAIT, start_ipv4ll, iface);
+		    astate->iface->name);
+	astate->addr.s_addr = ipv4ll_pick_addr(astate);
+	eloop_timeout_add_sec(astate->iface->ctx->eloop,
+		state->conflicts >= MAX_CONFLICTS ?
+		RATE_LIMIT_INTERVAL : PROBE_WAIT,
+		ipv4ll_probe, astate);
+}
+
+void
+ipv4ll_start(void *arg)
+{
+	struct interface *ifp = arg;
+	struct dhcp_state *state = D_STATE(ifp);
+	struct arp_state *astate;
+	struct ipv4_addr *ap;
+
+	if (state->arp_ipv4ll)
+		return;
+
+	/* RFC 3927 Section 2.1 states that the random number generator
+	 * SHOULD be seeded with a value derived from persistent information
+	 * such as the IEEE 802 MAC address so that it usually picks
+	 * the same address without persistent storage. */
+	if (state->conflicts == 0) {
+		unsigned int seed;
+
+		if (sizeof(seed) > ifp->hwlen) {
+			seed = 0;
+			memcpy(&seed, ifp->hwaddr, ifp->hwlen);
+		} else
+			memcpy(&seed, ifp->hwaddr + ifp->hwlen - sizeof(seed),
+			    sizeof(seed));
+		initstate(seed, state->randomstate, sizeof(state->randomstate));
 	}
+
+	if ((astate = arp_new(ifp)) == NULL)
+		return;
+
+	state->arp_ipv4ll = astate;
+	astate->probed_cb = ipv4ll_probed;
+	astate->announced_cb = ipv4ll_announced;
+	astate->conflicted_cb = ipv4ll_conflicted;
+
+	if (IN_LINKLOCAL(htonl(state->addr.s_addr))) {
+		astate->addr = state->addr;
+		arp_announce(astate);
+		return;
+	}
+
+	if (state->offer && IN_LINKLOCAL(ntohl(state->offer->yiaddr))) {
+		astate->addr.s_addr = state->offer->yiaddr;
+		free(state->offer);
+		state->offer = NULL;
+		ap = ipv4_iffindaddr(ifp, &astate->addr, NULL);
+	} else
+		ap = ipv4_iffindlladdr(ifp);
+	if (ap) {
+		astate->addr = ap->addr;
+		ipv4ll_probed(astate);
+		return;
+	}
+
+	setstate(state->randomstate);
+	/* We maybe rebooting an IPv4LL address. */
+	if (!IN_LINKLOCAL(htonl(astate->addr.s_addr))) {
+		syslog(LOG_INFO, "%s: probing for an IPv4LL address",
+		    ifp->name);
+		astate->addr.s_addr = INADDR_ANY;
+	}
+	if (astate->addr.s_addr == INADDR_ANY)
+		astate->addr.s_addr = ipv4ll_pick_addr(astate);
+	arp_probe(astate);
+}
+
+void
+ipv4ll_stop(struct interface *ifp)
+{
+	struct dhcp_state *state = D_STATE(ifp);
+
+	eloop_timeout_delete(ifp->ctx->eloop, NULL, state->arp_ipv4ll);
 }

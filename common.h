@@ -1,6 +1,6 @@
-/* 
+/*
  * dhcpcd - DHCP client daemon
- * Copyright (c) 2006-2011 Roy Marples <roy@marples.name>
+ * Copyright (c) 2006-2015 Roy Marples <roy@marples.name>
  * All rights reserved
 
  * Redistribution and use in source and binary forms, with or without
@@ -28,31 +28,71 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <sys/param.h>
 #include <sys/time.h>
 #include <stdio.h>
 
 #include "config.h"
 #include "defs.h"
 
-#define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
+#ifndef HOSTNAME_MAX_LEN
+#define HOSTNAME_MAX_LEN	250	/* 255 - 3 (FQDN) - 2 (DNS enc) */
+#endif
 
-#define timeval_to_double(tv) ((tv)->tv_sec * 1.0 + (tv)->tv_usec * 1.0e-6)
-#define timernorm(tvp)							\
-	do {								\
-		while ((tvp)->tv_usec >= 1000000) {			\
-			(tvp)->tv_sec++;				\
-			(tvp)->tv_usec -= 1000000;			\
-		}							\
-	} while (0 /* CONSTCOND */);
+#ifndef MIN
+#define MIN(a,b)		((/*CONSTCOND*/(a)<(b))?(a):(b))
+#define MAX(a,b)		((/*CONSTCOND*/(a)>(b))?(a):(b))
+#endif
+
+#define UNCONST(a)		((void *)(unsigned long)(const void *)(a))
+#define STRINGIFY(a)		#a
+#define TOSTRING(a)		STRINGIFY(a)
+
+#define USECINSEC		1000000
+#define timeval_to_double(tv)						\
+	((double)(tv)->tv_sec + (double)((tv)->tv_usec) * 1.0e-6)
+#define timernorm(tv) do {						\
+	while ((tv)->tv_usec >=  USECINSEC) {				\
+		(tv)->tv_sec++;						\
+		(tv)->tv_usec -= USECINSEC;				\
+	}								\
+} while (0 /* CONSTCOND */);
+#define tv_to_ms(ms, tv) do {						\
+	ms = (tv)->tv_sec * 1000;					\
+	ms += (tv)->tv_usec / 1000;					\
+} while (0 /* CONSTCOND */);
+#define ms_to_tv(tv, ms) do {						      \
+	(tv)->tv_sec = ms / 1000;					      \
+	(tv)->tv_usec = (suseconds_t)(ms - ((tv)->tv_sec * 1000)) * 1000;     \
+} while (0 /* CONSTCOND */);
+
+#ifndef TIMEVAL_TO_TIMESPEC
+#define	TIMEVAL_TO_TIMESPEC(tv, ts) do {				\
+	(ts)->tv_sec = (tv)->tv_sec;					\
+	(ts)->tv_nsec = (tv)->tv_usec * 1000;				\
+} while (0 /* CONSTCOND */)
+#endif
 
 #if __GNUC__ > 2 || defined(__INTEL_COMPILER)
-# define _noreturn __attribute__((__noreturn__))
-# define _packed   __attribute__((__packed__))
-# define _unused   __attribute__((__unused__))
+# ifndef __dead
+#  define __dead __attribute__((__noreturn__))
+# endif
+# ifndef __packed
+#  define __packed   __attribute__((__packed__))
+# endif
+# ifndef __unused
+#  define __unused   __attribute__((__unused__))
+# endif
 #else
-# define _noreturn
-# define _packed
-# define _unused
+# ifndef __dead
+#  define __dead
+# endif
+# ifndef __packed
+#  define __packed
+# endif
+# ifndef __unused
+#  define __unused
+# endif
 #endif
 
 /* We don't really need this as our supported systems define __restrict
@@ -67,47 +107,14 @@
 # endif
 #endif
 
-int set_cloexec(int);
-int set_nonblock(int);
-char *get_line(FILE * __restrict);
+void get_line_free(void);
+const char *get_hostname(char *, size_t, int);
 extern int clock_monotonic;
 int get_monotonic(struct timeval *);
 ssize_t setvar(char ***, const char *, const char *, const char *);
-ssize_t setvard(char ***, const char *, const char *, int);
+ssize_t setvard(char ***, const char *, const char *, size_t);
 time_t uptime(void);
-int writepid(int, pid_t);
-void *xrealloc(void *, size_t);
-void *xmalloc(size_t);
-void *xzalloc(size_t);
-char *xstrdup(const char *);
 
-/* Uncomment the #def below to send DHCPCD syslog messages to Android's logcat
- * instead.  */
-/* #define REDIRECT_SYSLOG_TO_ANDROID_LOGCAT */
-#ifdef REDIRECT_SYSLOG_TO_ANDROID_LOGCAT
-
-#define LOG_TAG "DHCPCD"
-#include <utils/Log.h>
-
-#undef LOG_EMERG
-#undef LOG_ALERT
-#undef LOG_CRIT
-#undef LOG_ERR
-#undef LOG_WARNING
-#undef LOG_NOTICE
-#undef LOG_INFO
-#undef LOG_DEBUG
-
-#define LOG_EMERG   ANDROID_LOG_FATAL
-#define LOG_ALERT   ANDROID_LOG_FATAL
-#define LOG_CRIT    ANDROID_LOG_FATAL
-#define LOG_ERR     ANDROID_LOG_ERROR
-#define LOG_WARNING ANDROID_LOG_WARN
-#define LOG_NOTICE  ANDROID_LOG_WARN
-#define LOG_INFO    ANDROID_LOG_INFO
-#define LOG_DEBUG   ANDROID_LOG_DEBUG
-#define syslog(a, b...) android_printLog(a, LOG_TAG, b)
-
-#endif  /* REDIRECT_SYSLOG_TO_ANDROID_LOGCAT */
-
+char *hwaddr_ntoa(const unsigned char *, size_t, char *, size_t);
+size_t hwaddr_aton(unsigned char *, const char *);
 #endif
