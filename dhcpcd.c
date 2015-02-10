@@ -1912,7 +1912,7 @@ main(int argc, char **argv)
 		ifaces = iface = xzalloc(sizeof(*iface));
 		strlcpy(iface->name, argv[optind], sizeof(iface->name));
 		snprintf(iface->leasefile, sizeof(iface->leasefile),
-		    LEASEFILE, iface->name);
+		    LEASEFILE, iface->name, "wired");
 		iface->state = xzalloc(sizeof(*iface->state));
 		iface->state->options = xzalloc(sizeof(*iface->state->options));
 		strlcpy(iface->state->options->script, if_options->script,

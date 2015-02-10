@@ -320,12 +320,15 @@ main(int argc, char *argv[])
     struct dhcp_message *dhcp;
     struct dhcp_lease *lease;
     char leasefile[PATH_MAX];
+    char *ssid = "wired";
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <interface>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <interface> [ssid]\n", argv[0]);
         exit(1);
     }
-    snprintf(leasefile, PATH_MAX, LEASEFILE, argv[1]);
+    if (argc >= 3)
+        ssid = argv[2];
+    snprintf(leasefile, PATH_MAX, LEASEFILE, argv[1], ssid);
     if ((dhcp = get_lease_from_file(leasefile)) == NULL) {
         fprintf(stderr, "Couldn't read lease file: %s\n", strerror(errno));
         exit(1);
