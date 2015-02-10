@@ -322,10 +322,10 @@ main(int argc, char *argv[])
     char leasefile[PATH_MAX];
 
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <interface>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <interface> [ssid]\n", argv[0]);
         exit(1);
     }
-    snprintf(leasefile, PATH_MAX, LEASEFILE, argv[1]);
+    snprintf(leasefile, PATH_MAX, LEASEFILE, argv[1], argc== 2 ? "wired" : argv[2]);
     if ((dhcp = get_lease_from_file(leasefile)) == NULL) {
         fprintf(stderr, "Couldn't read lease file: %s\n", strerror(errno));
         exit(1);
