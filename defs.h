@@ -40,7 +40,7 @@
 # define DUID			SYSCONFDIR "/" PACKAGE ".duid"
 #endif
 #ifndef LEASEFILE
-# define LEASEFILE		DBDIR "/" PACKAGE "-%s.lease"
+# define LEASEFILE		DBDIR "/" PACKAGE "-%s-%s.lease"
 #endif
 #ifndef PIDFILE
 # define PIDFILE		RUNDIR "/" PACKAGE "%s%s.pid"
