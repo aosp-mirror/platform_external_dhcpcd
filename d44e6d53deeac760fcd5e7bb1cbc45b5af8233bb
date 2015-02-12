@@ -1,0 +1,96 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "b637b9c2_491dc102",
+        "filename": "dhcpcd.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 1915,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2015-02-12T20:28:23Z",
+      "side": 1,
+      "message": "Is it intentionally hardcoded?",
+      "range": {
+        "startLine": 1915,
+        "startChar": 31,
+        "endLine": 1915,
+        "endChar": 36
+      },
+      "revId": "d44e6d53deeac760fcd5e7bb1cbc45b5af8233bb",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "36758977_f83d6deb",
+        "filename": "net.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 200,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2015-02-12T20:28:23Z",
+      "side": 1,
+      "message": "Please move it to next line (as whole file style)",
+      "range": {
+        "startLine": 200,
+        "startChar": 55,
+        "endLine": 200,
+        "endChar": 56
+      },
+      "revId": "d44e6d53deeac760fcd5e7bb1cbc45b5af8233bb",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "7631c1d0_c700bee5",
+        "filename": "net.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 211,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2015-02-12T20:28:23Z",
+      "side": 1,
+      "message": "How iface-\u003essid will be set?",
+      "range": {
+        "startLine": 211,
+        "startChar": 10,
+        "endLine": 211,
+        "endChar": 14
+      },
+      "revId": "d44e6d53deeac760fcd5e7bb1cbc45b5af8233bb",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    },
+    {
+      "key": {
+        "uuid": "b637b9c2_294a4de8",
+        "filename": "showlease.c",
+        "patchSetId": 3
+      },
+      "lineNbr": 328,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2015-02-12T20:28:23Z",
+      "side": 1,
+      "message": "You are not remembering it, at least it is not obvious where you are doing it.",
+      "range": {
+        "startLine": 328,
+        "startChar": 65,
+        "endLine": 328,
+        "endChar": 69
+      },
+      "revId": "d44e6d53deeac760fcd5e7bb1cbc45b5af8233bb",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}
