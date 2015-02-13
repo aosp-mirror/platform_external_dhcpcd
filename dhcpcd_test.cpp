@@ -97,9 +97,9 @@ class DhcpcdGetOptionTest : public ::testing::Test {
   }
 
   struct dhcp_message dhcpmsgs[2];
-  size_t type_index;
-  size_t length_index;
-  size_t value_index;
+  volatile size_t type_index;
+  volatile size_t length_index;
+  volatile size_t value_index;
 };
 
 TEST_F(DhcpcdGetOptionTest, OptionNotPresent) {
