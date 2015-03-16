@@ -39,7 +39,7 @@
  * compatibility with getopt */
 #define IF_OPTS "abc:de:f:gh:i:kl:m:no:pqr:s:t:u:v:wxy:z:ABC:DEF:GHI:JKLO:Q:S:TUVW:X:Z:"
 
-#define DEFAULT_TIMEOUT		30
+#define DEFAULT_TIMEOUT		0       /* keep retrying forever... */
 #define DEFAULT_REBOOT		5
 
 #define HOSTNAME_MAX_LEN	250	/* 255 - 3 (FQDN) - 2 (DNS enc) */
