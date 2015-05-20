@@ -609,7 +609,10 @@ int
 open_udp_socket(struct interface *iface)
 {
 	int s;
-	struct sockaddr_in sin;
+	union {
+		struct sockaddr_in in;
+		struct sockaddr sa;
+	} addr;
 	int n;
 #ifdef SO_BINDTODEVICE
 	struct ifreq ifr;
@@ -638,11 +641,11 @@ open_udp_socket(struct interface *iface)
 	n = 1;
 	if (setsockopt(s, SOL_SOCKET, SO_RCVBUF, &n, sizeof(n)) == -1)
 		goto eexit;
-	memset(&sin, 0, sizeof(sin));
-	sin.sin_family = AF_INET;
-	sin.sin_port = htons(DHCP_CLIENT_PORT);
-	sin.sin_addr.s_addr = iface->addr.s_addr;
-	if (bind(s, (struct sockaddr *)&sin, sizeof(sin)) == -1)
+	memset(&addr, 0, sizeof(addr));
+	addr.in.sin_family = AF_INET;
+	addr.in.sin_port = htons(DHCP_CLIENT_PORT);
+	addr.in.sin_addr.s_addr = iface->addr.s_addr;
+	if (bind(s, &addr.sa, sizeof(addr)) == -1)
 		goto eexit;
 
 	iface->udp_fd = s;
@@ -658,14 +661,17 @@ ssize_t
 send_packet(const struct interface *iface, struct in_addr to,
     const uint8_t *data, ssize_t len)
 {
-	struct sockaddr_in sin;
+	union {
+		struct sockaddr sa;
+		struct sockaddr_in in;
+	} sin;
 
 	memset(&sin, 0, sizeof(sin));
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = to.s_addr;
-	sin.sin_port = htons(DHCP_SERVER_PORT);
+	sin.in.sin_family = AF_INET;
+	sin.in.sin_addr.s_addr = to.s_addr;
+	sin.in.sin_port = htons(DHCP_SERVER_PORT);
 	return sendto(iface->udp_fd, data, len, 0,
-	    (struct sockaddr *)&sin, sizeof(sin));
+	    &sin.sa, sizeof(sin));
 }
 
 struct udp_dhcp_packet

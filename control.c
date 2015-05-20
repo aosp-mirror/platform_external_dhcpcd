@@ -46,7 +46,10 @@ static int fd = -1;
 static char buffer[1024];
 static char *argvp[255];
 
-struct sockaddr_un sun;
+union {
+    struct sockaddr sa;
+    struct sockaddr_un un;
+} sun;
 struct fd_list *fds = NULL;
 
 static void
@@ -100,13 +103,16 @@ handle_control_data(void *arg)
 static void
 handle_control(_unused void *arg)
 {
-	struct sockaddr_un run;
+	union {
+		struct sockaddr sa;
+		struct sockaddr_un un;
+	} run;
 	socklen_t len;
 	struct fd_list *l;
 	int f;
 
 	len = sizeof(run);
-	if ((f = accept(fd, (struct sockaddr *)&run, &len)) == -1)
+	if ((f = accept(fd, &run.sa, &len)) == -1)
 		return;
 	l = xmalloc(sizeof(*l));
 	l->fd = f;
@@ -122,9 +128,9 @@ make_sock(void)
 	if ((fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1)
 		return -1;
 	memset(&sun, 0, sizeof(sun));
-	sun.sun_family = AF_UNIX;
-	strlcpy(sun.sun_path, CONTROLSOCKET, sizeof(sun.sun_path));
-	return sizeof(sun.sun_family) + strlen(sun.sun_path) + 1;
+	sun.un.sun_family = AF_UNIX;
+	strlcpy(sun.un.sun_path, CONTROLSOCKET, sizeof(sun.un.sun_path));
+	return sizeof(sun.un.sun_family) + strlen(sun.un.sun_path) + 1;
 }
 
 int
@@ -135,7 +141,7 @@ start_control(void)
 	if ((len = make_sock()) == -1)
 		return -1;
 	unlink(CONTROLSOCKET);
-	if (bind(fd, (struct sockaddr *)&sun, len) == -1 ||
+	if (bind(fd, &sun.sa, len) == -1 ||
 	    chmod(CONTROLSOCKET,
 		S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP) == -1 ||
 	    set_cloexec(fd) == -1 ||
@@ -181,7 +187,7 @@ open_control(void)
 
 	if ((len = make_sock()) == -1)
 		return -1;
-	return connect(fd, (struct sockaddr *)&sun, len);
+	return connect(fd, &sun.sa, len);
 }
 
 int
