@@ -52,7 +52,7 @@
 #define RFC3442 (1 << 12)
 #define RFC5969 (1 << 13)
 
-#define IPV4R	IPV4 | REQUEST
+#define IPV4R	(IPV4 | REQUEST)
 
 #define DAD	"Duplicate address detected"
 
@@ -874,7 +874,7 @@ encode_rfc1035(const char *src, uint8_t *dst)
 	{								      \
 		*p++ = _type;						      \
 		*p++ = 4;						      \
-		memcpy(p, &_val.s_addr, 4);				      \
+		memcpy(p, &(_val).s_addr, 4);				      \
 		p += 4;							      \
 	}
 
