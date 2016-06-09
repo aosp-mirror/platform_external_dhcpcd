@@ -43,7 +43,7 @@
 #include "dhcpcd.h"
 
 #ifndef DUID_LEN
-#  define DUID_LEN			128 + 2
+#  define DUID_LEN			(128 + 2)
 #endif
 
 #define EUI64_ADDR_LEN			8
@@ -66,9 +66,9 @@
  * 192.168/16
  */
 #ifndef IN_PRIVATE
-# define IN_PRIVATE(addr) (((addr & IN_CLASSA_NET) == 0x0a000000) ||	      \
-	    ((addr & 0xfff00000)    == 0xac100000) ||			      \
-	    ((addr & IN_CLASSB_NET) == 0xc0a80000))
+# define IN_PRIVATE(addr) ((((addr) & IN_CLASSA_NET) == 0x0a000000) ||	      \
+	    (((addr) & 0xfff00000)    == 0xac100000) ||			      \
+	    (((addr) & IN_CLASSB_NET) == 0xc0a80000))
 #endif
 
 #define LINKLOCAL_ADDR	0xa9fe0000
@@ -76,7 +76,7 @@
 #define LINKLOCAL_BRDC	(LINKLOCAL_ADDR | ~LINKLOCAL_MASK)
 
 #ifndef IN_LINKLOCAL
-# define IN_LINKLOCAL(addr) ((addr & IN_CLASSB_NET) == LINKLOCAL_ADDR)
+# define IN_LINKLOCAL(addr) (((addr) & IN_CLASSB_NET) == LINKLOCAL_ADDR)
 #endif
 
 struct rt {

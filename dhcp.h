@@ -65,7 +65,7 @@
 #define T2			0.875
 #define DHCP_BASE		4
 #define DHCP_MAX		64
-#define DHCP_RAND_MIN		-1
+#define DHCP_RAND_MIN		(-1)
 #define DHCP_RAND_MAX		1
 #define DHCP_ARP_FAIL		10
 
@@ -73,10 +73,10 @@
 #define USECS_SECOND		1000000
 /* As we use timevals, we should use the usec part for
  * greater randomisation. */
-#define DHCP_RAND_MIN_U		DHCP_RAND_MIN * USECS_SECOND
-#define DHCP_RAND_MAX_U		DHCP_RAND_MAX * USECS_SECOND
-#define PROBE_MIN_U		PROBE_MIN * USECS_SECOND
-#define PROBE_MAX_U		PROBE_MAX * USECS_SECOND
+#define DHCP_RAND_MIN_U		(DHCP_RAND_MIN * USECS_SECOND)
+#define DHCP_RAND_MAX_U		(DHCP_RAND_MAX * USECS_SECOND)
+#define PROBE_MIN_U		(PROBE_MIN * USECS_SECOND)
+#define PROBE_MAX_U		(PROBE_MAX * USECS_SECOND)
 
 /* DHCP options */
 enum DHO {
@@ -173,9 +173,9 @@ struct dhcp_lease {
 #include "if-options.h"
 #include "net.h"
 
-#define add_option_mask(var, val) (var[val >> 3] |= 1 << (val & 7))
-#define del_option_mask(var, val) (var[val >> 3] &= ~(1 << (val & 7)))
-#define has_option_mask(var, val) (var[val >> 3] & (1 << (val & 7)))
+#define add_option_mask(var, val) ((var)[(val) >> 3] |= 1 << ((val) & 7))
+#define del_option_mask(var, val) ((var)[(val) >> 3] &= ~(1 << ((val) & 7)))
+#define has_option_mask(var, val) ((var)[(val) >> 3] & (1 << ((val) & 7)))
 int make_option_mask(uint8_t *, const char *, int);
 void print_options(void);
 char *get_option_string(const struct dhcp_message *, uint8_t);
@@ -183,7 +183,7 @@ int get_option_addr(struct in_addr *, const struct dhcp_message *, uint8_t);
 int get_option_uint32(uint32_t *, const struct dhcp_message *, uint8_t);
 int get_option_uint16(uint16_t *, const struct dhcp_message *, uint8_t);
 int get_option_uint8(uint8_t *, const struct dhcp_message *, uint8_t);
-#define is_bootp(m) (m &&						\
+#define is_bootp(m) ((m) &&						\
 	    !IN_LINKLOCAL(htonl((m)->yiaddr)) &&			\
 	    get_option_uint8(NULL, m, DHO_MESSAGETYPE) == -1)
 struct rt *get_option_routes(const struct dhcp_message *, const char *,

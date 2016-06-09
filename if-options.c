@@ -49,12 +49,12 @@
 
 /* These options only make sense in the config file, so don't use any
    valid short options for them */
-#define O_BASE		MAX('z', 'Z') + 1
-#define O_ARPING	O_BASE + 1
-#define O_FALLBACK	O_BASE + 2
-#define O_DESTINATION	O_BASE + 3
-#define O_NOIPV6RS	O_BASE + 4
-#define O_IPV6_RA_FORK	O_BASE + 5
+#define O_BASE		(MAX('z', 'Z') + 1)
+#define O_ARPING	(O_BASE + 1)
+#define O_FALLBACK	(O_BASE + 2)
+#define O_DESTINATION	(O_BASE + 3)
+#define O_NOIPV6RS	(O_BASE + 4)
+#define O_IPV6_RA_FORK	(O_BASE + 5)
 
 const struct option cf_options[] = {
 	{"background",      no_argument,       NULL, 'b'},

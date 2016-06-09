@@ -23,7 +23,7 @@
 #include <gtest/gtest.h>
 
 // For convenience.
-#define ARRAYSIZE(x) sizeof((x)) / sizeof((x)[0])
+#define ARRAYSIZE(x) (sizeof((x)) / sizeof((x)[0]))
 
 // Regrettably, copy these defines and the dhcp_message structure in from
 // dhcp.h.  This header file is not easily included, since subsequent

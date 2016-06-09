@@ -58,7 +58,7 @@ enum DHS {
 
 #define LINK_UP 	1
 #define LINK_UNKNOWN	0
-#define LINK_DOWN 	-1
+#define LINK_DOWN 	(-1)
 
 struct if_state {
 	enum DHS state;
