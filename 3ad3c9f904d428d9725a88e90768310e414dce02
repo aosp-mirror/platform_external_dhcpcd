@@ -1,0 +1,27 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "b637b9c2_e96115a3",
+        "filename": "dhcpcd.c",
+        "patchSetId": 2
+      },
+      "lineNbr": 1915,
+      "author": {
+        "id": 1000414
+      },
+      "writtenOn": "2018-09-28T17:35:08Z",
+      "side": 1,
+      "message": "Why it is hardcoded?",
+      "range": {
+        "startLine": 1915,
+        "startChar": 30,
+        "endLine": 1915,
+        "endChar": 31
+      },
+      "revId": "3ad3c9f904d428d9725a88e90768310e414dce02",
+      "serverId": "85c56323-6fa9-3386-8a01-6480fb634889",
+      "unresolved": false
+    }
+  ]
+}
